@@ -30,11 +30,6 @@ test-file:
 # Run specific test function
 test-func:
 	poetry run pytest test/$(file) -v --tb=short -k "$(function)"
-# Run tests with Docker services
-test-docker:
-	docker-compose up -d
-	poetry run pytest test/ -v --tb=short -m "integration and requires_docker"
-	docker-compose down
 # Clean pytest cache and coverage files
 clean:
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true

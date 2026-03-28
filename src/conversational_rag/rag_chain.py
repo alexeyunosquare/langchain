@@ -12,7 +12,7 @@ from abc import ABC
 
 from langchain_community.document_loaders import TextLoader
 from langchain_community.vectorstores import Chroma
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda
@@ -114,7 +114,7 @@ class RAGChain:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             base_url=f"http://{self.lmstudio_host}:{self.lmstudio_port}/v1",
-            api_key="lm-studio"  # Dummy key for LM Studio
+            api_key="lm-studio",  # Dummy key for LM Studio
         )
         
         # Initialize vector store
