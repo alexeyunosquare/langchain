@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/conversational_rag"]
+
+[project]
+name = "conversational-rag"
+version = "0.1.0"
+description = "Conversational RAG with memory using LangChain and ChromaDB"
+readme = "README.md"
+requires-python = ">=3.13,<4.0"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "langchain",           # Latest v1.x (auto-upgrades with -U)
+    "langchain-community",
+    "langchain-core",
+    "langchain-openai",
+    "langchain-text-splitters",
+    "chromadb>=0.5.0",
+    "llama-cpp-python>=0.2.0",
+    "pydantic>=2.0.0",
+    # Pin OpenTelemetry packages to avoid version conflicts
+    # ReadableLogRecord import error occurs when opentelemetry-sdk and 
+    # opentelemetry-exporter-otlp versions are mismatched
+    "opentelemetry-sdk>=1.24.0,<2.0.0",
+    "opentelemetry-exporter-otlp>=1.24.0,<2.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "black>=24.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.0.0",
+    # Ensure consistent OpenTelemetry versions in dev environment
+    "opentelemetry-sdk>=1.24.0,<2.0.0",
+    "opentelemetry-exporter-otlp>=1.24.0,<2.0.0",
+]
+
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/conversational-rag"
+Documentation = "https://github.com/yourusername/conversational-rag#readme"
+Repository = "https://github.com/yourusername/conversational-rag.git"
+Issues = "https://github.com/yourusername/conversational-rag/issues"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+markers = [
+    "integration: mark test as integration test",
+    "slow: mark test as slow running",
+    "requires_docker: mark test as requiring Docker",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.black]
+target-version = ['py313']
+[tool.ruff]
+target-version = "py313"
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "ARG", "SIM"]
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
