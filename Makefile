@@ -1,4 +1,4 @@
-.PHONY: install install-dev install-docs test test-fast test-integration test-all clean-cov help
+.PHONY: install install-dev install-docs test test-fast test-integration test-all clean-cov help test-agentic test-agentic-fast lint lint-check format
 
 # Install main project dependencies
 install:
@@ -21,6 +21,12 @@ test-integration:
 # Run all tests with coverage
 test-all:
 	poetry run pytest test/ -v --tb=short --cov=test --cov-report=html
+# Run agentic RAG tests
+test-agentic:
+	poetry run pytest test/agentic_rag/ -v --tb=short
+# Run agentic RAG tests (non-integration only)
+test-agentic-fast:
+	poetry run pytest test/agentic_rag/ -v --tb=short -m "not integration"
 # Run tests with verbose output and detailed tracebacks
 test-debug:
 	poetry run pytest test/ -vvv --tb=long
@@ -38,6 +44,16 @@ clean:
 	find . -type f -name ".coverage" -delete 2>/dev/null || true
 	rm -rf htmlcov/ 2>/dev/null || true
 
+# Lint with ruff
+lint:
+	poetry run ruff check .
+# Lint check (exit with error if issues found)
+lint-check:
+	poetry run ruff check . --exit-non-zero-on-fix
+# Format code with ruff
+format:
+	poetry run ruff format .
+
 # Show help message
 help:
 	@echo "Available targets:"
@@ -49,4 +65,9 @@ help:
 	@echo "  test-file     - Run specific test file (use TEST_FILE=filename)"
 	@echo "  test-func     - Run specific test function (use TEST_FILE=filename TEST_FUNC=function_name)"
 	@echo "  test-docker   - Run Docker-dependent tests"
+	@echo "  test-agentic  - Run agentic RAG tests"
+	@echo "  test-agentic-fast - Run agentic RAG tests (non-integration)"
 	@echo "  clean         - Clean pytest cache and coverage files"
+	@echo "  lint          - Run ruff lint"
+	@echo "  lint-check    - Run ruff lint check (exit non-zero on issues)"
+	@echo "  format        - Format code with ruff"
