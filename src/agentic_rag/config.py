@@ -89,7 +89,7 @@ class AgenticRAGConfig:
         Create configuration from environment variables.
 
         Args:
-            **overrides: Override values for specific configuration
+            **overrides: Override values for specific configuration (highest priority)
 
         Returns:
             AgenticRAGConfig instance
@@ -121,8 +121,10 @@ class AgenticRAGConfig:
                 d.strip() for d in exclude_domains.split(",")
             ]
 
-        # Apply overrides
-        config_dict.update(overrides)
+        # Apply overrides last (highest priority)
+        for key, value in overrides.items():
+            if value is not None:
+                config_dict[key] = value
 
         return cls(**config_dict)
 

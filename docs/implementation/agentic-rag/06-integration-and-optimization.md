@@ -61,7 +61,7 @@ Integrate all Agentic RAG components into a cohesive system, run comprehensive t
 
 ### 6.1 Create Main Integration Module
 
-**File: `src/conversational_rag/agentic_rag/__init__.py`**
+**File: `src/agentic_rag/__init__.py`**
 
 ```python
 # Pseudo code: Public API
@@ -93,7 +93,7 @@ __all__ = [
 __version__ = "0.1.0"
 ```
 
-**File: `src/conversational_rag/__init__.py`** (update existing)
+**File: `src/agentic_rag/__init__.py`** (update existing)
 
 ```python
 # Pseudo: Add agentic RAG to main package
@@ -112,7 +112,7 @@ __all__ = [
 
 ### 6.2 Create Configuration Management
 
-**File: `src/conversational_rag/agentic_rag/config.py`**
+**File: `src/agentic_rag/config.py`**
 
 ```python
 # Pseudo code:
@@ -167,7 +167,7 @@ class AgenticRagConfig(BaseModel):
 
 ### 6.3 Implement Factory Function
 
-**File: `src/conversational_rag/agentic_rag/factory.py`**
+**File: `src/agentic_rag/factory.py`**
 
 ```python
 # Pseudo code:
@@ -460,7 +460,7 @@ pytest test/agentic_rag/ -m integration -v
 pytest test/agentic_rag/test_benchmarks.py -v
 
 # Full suite with coverage
-pytest test/agentic_rag/ --cov=src/conversational_rag/agentic_rag --cov-report=html
+pytest test/agentic_rag/ --cov=src/agentic_rag --cov-report=html
 ```
 
 ## Success Criteria

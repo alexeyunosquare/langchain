@@ -27,7 +27,7 @@ LangGraph provides a stateful, multi-node architecture for building agents. The 
 
 ### 3.1 Define Agent State Schema
 
-**File: `src/conversational_rag/agentic_rag/state.py`**
+**File: `src/agentic_rag/state.py`**
 
 ```python
 # Pseudo code:
@@ -74,7 +74,7 @@ class AgenticRagState(BaseModel):
 
 ### 3.2 Implement Node Functions
 
-**File: `src/conversational_rag/agentic_rag/agent.py`**
+**File: `src/agentic_rag/agent.py`**
 
 Each node in the graph performs a specific task:
 
@@ -147,7 +147,7 @@ def rerun_search_node(state: AgenticRagState) -> dict:
 
 ### 3.3 Build LangGraph Workflow
 
-**File: `src/conversational_rag/agentic_rag/agent.py`**
+**File: `src/agentic_rag/agent.py`**
 
 ```python
 # Pseudo code:

@@ -15,6 +15,13 @@ from langchain_core.retrievers import BaseRetriever
 from .config import AgenticRAGConfig
 from .corrective import CorrectiveRAG
 from .evaluator import EvaluationResult, RelevanceEvaluator
+from .search import (
+    DocumentResult,
+    HybridRetrievalResult,
+    HybridRetriever,
+    TavilySearch,
+    TavilySearchIntegration,
+)
 from .state import AgentState, Document, MessageRole
 
 
@@ -30,6 +37,10 @@ class AgentResult:
         validation_passed: Whether answer passed quality validation
         search_iterations: Number of search iterations before final answer
         hallucination_score: Score indicating potential hallucination (0-1)
+        tavily_used: Whether Tavily web search was used
+        tavily_document_count: Number of documents from Tavily
+        local_document_count: Number of documents from local source
+        total_documents: Total number of documents used
     """
 
     answer: str
@@ -38,6 +49,10 @@ class AgentResult:
     validation_passed: bool = True
     search_iterations: int = 0
     hallucination_score: Optional[float] = None
+    tavily_used: bool = False
+    tavily_document_count: int = 0
+    local_document_count: int = 0
+    total_documents: int = 0
 
 
 class AgenticRAGAgent:
@@ -45,7 +60,7 @@ class AgenticRAGAgent:
     Main agent for Agentic RAG workflow.
 
     This agent orchestrates the complete RAG pipeline:
-    1. Retrieves documents based on user query
+    1. Retrieves documents based on user query (local + Tavily)
     2. Evaluates document relevance
     3. Decides whether to search again or generate answer
     4. Generates and validates answer
@@ -54,8 +69,10 @@ class AgenticRAGAgent:
     Attributes:
         llm: Language model for query processing and answer generation
         retriever: Document retriever for initial search
+        tavily_search: Tavily search integration for web search
         evaluator: Document relevance evaluator
         corrective: CRAG component for validation and correction
+        hybrid_retriever: Hybrid retriever combining local + Tavily
         state: Current agent state
         config: Configuration settings
     """
@@ -76,30 +93,53 @@ Answer:
     def __init__(
         self,
         llm: BaseLanguageModel,
-        retriever: BaseRetriever,
+        local_retriever: BaseRetriever,
         evaluator: RelevanceEvaluator,
+        tavily_search: Optional[TavilySearch] = None,
         corrective: Optional[CorrectiveRAG] = None,
         config: Optional[AgenticRAGConfig] = None,
         max_iterations: Optional[int] = None,
+        use_hybrid_retrieval: bool = True,
+        tavily_priority: float = 0.3,
     ) -> None:
         """
         Initialize the agentic RAG agent.
 
         Args:
             llm: Language model for processing
-            retriever: Document retriever for search
+            local_retriever: Local document retriever for search
             evaluator: Document relevance evaluator
+            tavily_search: Optional Tavily search for web search
             corrective: Optional corrective RAG component
             config: Optional configuration (uses defaults if None)
             max_iterations: Override max search iterations (deprecated, use config)
+            use_hybrid_retrieval: Whether to use hybrid local+Tavily retrieval
+            tavily_priority: Weight for Tavily results (0-1)
         """
         self.llm = llm
-        self.retriever = retriever
+        self.local_retriever = local_retriever
         self.evaluator = evaluator
+        self.tavily_search = tavily_search
         self.corrective = corrective or CorrectiveRAG(llm=llm)
         self.config = config or AgenticRAGConfig()
         if max_iterations is not None:
             self.config.max_search_iterations = max_iterations
+
+        # Initialize hybrid retriever if Tavily is available
+        self.use_hybrid_retrieval = use_hybrid_retrieval
+        if use_hybrid_retrieval and tavily_search:
+            from .search import QueryRefiner
+
+            query_refiner = QueryRefiner(llm=llm)
+            self.hybrid_retriever = HybridRetriever(
+                local_retriever=local_retriever,
+                tavily_search=tavily_search,
+                query_refiner=query_refiner,
+                tavily_priority=tavily_priority,
+            )
+        else:
+            self.hybrid_retriever = None
+
         self.state = AgentState()
 
     def run(
@@ -133,13 +173,23 @@ Answer:
                 self.state.iteration = iteration
 
                 # Retrieve documents
-                search_results = self._retrieve_documents(query)
-                search_count += 1
-                self.state.search_count = search_count
-                self.state.search_results = search_results
+                if self.use_hybrid_retrieval and self.hybrid_retriever:
+                    # Use hybrid retrieval (local + Tavily)
+                    search_result = self._retrieve_documents_hybrid(query)
+                    search_count = self._get_search_count_from_hybrid(search_result)
+                    documents = self._convert_hybrid_to_documents(search_result)
+                else:
+                    # Use local retrieval only
+                    search_results = self._retrieve_documents_local(query)
+                    search_count += 1
+                    documents = self._convert_to_documents(search_results)
 
-                # Convert to Document objects
-                documents = self._convert_to_documents(search_results)
+                self.state.search_count = search_count
+                self.state.search_results = (
+                    search_result.to_dict()
+                    if self.use_hybrid_retrieval
+                    else search_results
+                )
                 self.state.documents = documents
 
                 # Evaluate relevance
@@ -183,6 +233,16 @@ Answer:
                 validation_passed=True,
                 search_iterations=iteration,
                 hallucination_score=hallucination_score,
+                tavily_used=search_result.tavily_count > 0
+                if self.use_hybrid_retrieval
+                else False,
+                tavily_document_count=search_result.tavily_count
+                if self.use_hybrid_retrieval
+                else 0,
+                local_document_count=search_result.local_count
+                if self.use_hybrid_retrieval
+                else len(final_documents),
+                total_documents=len(final_documents),
             )
 
         except Exception as e:
@@ -197,11 +257,15 @@ Answer:
                 validation_passed=False,
                 search_iterations=iteration,
                 hallucination_score=1.0,
+                tavily_used=False,
+                tavily_document_count=0,
+                local_document_count=0,
+                total_documents=0,
             )
 
-    def _retrieve_documents(self, query: str) -> List[dict]:
+    def _retrieve_documents_local(self, query: str) -> List[dict]:
         """
-        Retrieve documents using the retriever.
+        Retrieve documents using local retriever only.
 
         Args:
             query: Search query
@@ -210,7 +274,7 @@ Answer:
             List of search results as dictionaries
         """
         try:
-            results = self.retriever.invoke(query)
+            results = self.local_retriever.invoke(query)
 
             # Convert to list of dicts
             search_results = []
@@ -229,12 +293,120 @@ Answer:
         except Exception:
             return []
 
+    def _retrieve_documents_hybrid(
+        self, query: str
+    ) -> HybridRetrievalResult:
+        """
+        Retrieve documents using hybrid retriever (local + Tavily).
+
+        Args:
+            query: Search query
+
+        Returns:
+            HybridRetrievalResult with combined documents
+        """
+        if not self.hybrid_retriever:
+            # Fallback to local retrieval if hybrid not available
+            local_docs = self._retrieve_documents_local(query)
+            return HybridRetrievalResult(
+                documents=[
+                    {
+                        "content": d["content"],
+                        "metadata": d["metadata"],
+                        "score": d["score"],
+                        "source": "local",
+                    }
+                    for d in local_docs
+                ],
+                local_count=len(local_docs),
+                tavily_count=0,
+            )
+
+        # Get evaluation feedback from state if available
+        eval_feedback = None
+        if hasattr(self.state, "evaluation_result") and self.state.evaluation_result:
+            eval_feedback = self.state.evaluation_result.to_dict()
+
+        # Perform hybrid retrieval
+        result = self.hybrid_retriever.retrieve(
+            query=query,
+            search_history=getattr(self.state, "search_history", []),
+            eval_feedback=eval_feedback,
+        )
+
+        return result
+
+    def _get_search_count_from_hybrid(
+        self, result: HybridRetrievalResult
+    ) -> int:
+        """
+        Get search count from hybrid retrieval result.
+
+        Args:
+            result: HybridRetrievalResult
+
+        Returns:
+            Search count (1 for local, 1 for Tavily if used)
+        """
+        count = 1  # Local search always happens
+        if result.tavily_count > 0:
+            count += 1
+        return count
+
+    def _convert_hybrid_to_documents(
+        self, result: HybridRetrievalResult
+    ) -> List[Document]:
+        """
+        Convert hybrid retrieval result to Document objects.
+
+        Args:
+            result: HybridRetrievalResult
+
+        Returns:
+            List of Document objects
+        """
+        documents = []
+        for doc_data in result.documents:
+            # Determine source
+            source = doc_data.get("source", "local")
+
+            # Create Document
+            doc = Document(
+                page_content=doc_data.get("content", ""),
+                metadata={
+                    **doc_data.get("metadata", {}),
+                    "source": source,
+                },
+                score=doc_data.get("score", 0.5),
+            )
+            documents.append(doc)
+
+        return documents
+
+    def _retrieve_documents(self, query: str) -> List[dict]:
+        """
+        Retrieve documents using the retriever.
+
+        DEPRECATED: Use _retrieve_documents_local or _retrieve_documents_hybrid
+        instead. This method is kept for backwards compatibility.
+
+        Args:
+            query: Search query
+
+        Returns:
+            List of search results as dictionaries
+        """
+        return self._retrieve_documents_local(query)
+
     def _convert_to_documents(
         self,
         search_results: List[dict],
     ) -> List[Document]:
         """
         Convert search results to Document objects.
+
+        DEPRECATED: Use _convert_hybrid_to_documents for hybrid results.
+        This method is kept for backwards compatibility.
 
         Args:
             search_results: List of search result dictionaries

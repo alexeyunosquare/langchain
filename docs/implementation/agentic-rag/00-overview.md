@@ -43,24 +43,25 @@ The implementation is divided into 6 phases:
 ## Directory Structure
 
 ```
-src/conversational_rag/
-├── agentic_rag/
+src/
+├── conversational_rag/     # Existing RAG chain
+├── agentic_rag/            # New Agentic RAG module
 │   ├── __init__.py
 │   ├── state.py              # LangGraph state definitions
 │   ├── evaluator.py          # Document relevance evaluator
 │   ├── agent.py              # Main agent orchestration
 │   ├── corrective.py         # CRAG logic
 │   └── search.py             # Tavily search integration
-├── rag_chain.py              # Existing RAG chain
-└── __init__.py
+└── conversational_rag/rag_chain.py  # Reference to existing RAG chain
 
-test/agentic_rag/
-├── __init__.py
-├── test_state.py
-├── test_evaluator.py
-├── test_agent.py
-├── test_corrective.py
-└── test_search.py
+test/
+├── agentic_rag/
+│   ├── __init__.py
+│   ├── test_state.py
+│   ├── test_evaluator.py
+│   ├── test_agent.py
+│   ├── test_corrective.py
+│   └── test_search.py
 ```
 
 ## Success Criteria

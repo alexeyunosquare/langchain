@@ -56,8 +56,9 @@ Each phase includes:
 ## 📁 Target Directory Structure
 
 ```
-src/conversational_rag/
-├── agentic_rag/
+src/
+├── conversational_rag/     # Existing RAG chain
+├── agentic_rag/            # New Agentic RAG module
 │   ├── __init__.py           # Public API
 │   ├── __init__.py           # Package init
 │   ├── config.py             # Configuration management
@@ -67,12 +68,13 @@ src/conversational_rag/
 │   ├── agent.py              # Main agent orchestration
 │   ├── corrective.py         # CRAG logic (validation & correction)
 │   └── search.py             # Tavily search integration
-└── rag_chain.py              # Existing RAG chain
+└── conversational_rag/rag_chain.py  # Reference to existing RAG chain
 
-test/agentic_rag/
-├── __init__.py
-├── test_config.py
-├── test_state.py
+test/
+├── agentic_rag/
+│   ├── __init__.py
+│   ├── test_config.py
+│   ├── test_state.py
 ├── test_evaluator.py
 ├── test_agent.py
 ├── test_corrective.py

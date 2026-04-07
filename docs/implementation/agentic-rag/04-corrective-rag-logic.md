@@ -32,7 +32,7 @@ CRAG adds a validation and correction loop to the RAG pipeline:
 
 ### 4.1 Define Validation Schema
 
-**File: `src/conversational_rag/agentic_rag/corrective.py`**
+**File: `src/agentic_rag/corrective.py`**
 
 ```python
 # Pseudo code:
@@ -71,7 +71,7 @@ class CorrectionResult(BaseModel):
 
 ### 4.2 Implement Answer Validator
 
-**File: `src/conversational_rag/agentic_rag/corrective.py`**
+**File: `src/agentic_rag/corrective.py`**
 
 ```python
 # Pseudo code:
@@ -143,7 +143,7 @@ class AnswerValidator:
 
 ### 4.3 Implement Correction Engine
 
-**File: `src/conversational_rag/agentic_rag/corrective.py`**
+**File: `src/agentic_rag/corrective.py`**
 
 ```python
 # Pseudo code:
@@ -239,7 +239,7 @@ class CorrectionEngine:
 
 ### 4.4 Integrate with Agent Workflow
 
-**File: `src/conversational_rag/agentic_rag/agent.py`**
+**File: `src/agentic_rag/agent.py`**
 
 Update the validate_answer_node to use CRAG:
 
@@ -361,7 +361,7 @@ class TestCragIntegration:
 
 ### 4.6 Add Metrics and Logging
 
-**File: `src/conversational_rag/agentic_rag/corrective.py`**
+**File: `src/agentic_rag/corrective.py`**
 
 ```python
 # Pseudo: Add metrics collection

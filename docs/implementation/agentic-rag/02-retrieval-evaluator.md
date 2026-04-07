@@ -23,7 +23,7 @@ Query + Retrieved Documents → Evaluator → Relevance Score + Decision
 
 ### 2.1 Define Evaluation State Schema
 
-**File: `src/conversational_rag/agentic_rag/evaluator.py`**
+**File: `src/agentic_rag/evaluator.py`**
 
 Create data models for evaluation:
 
@@ -56,7 +56,7 @@ class EvaluationResult(BaseModel):
 
 ### 2.2 Implement Relevance Evaluator Class
 
-**File: `src/conversational_rag/agentic_rag/evaluator.py`**
+**File: `src/agentic_rag/evaluator.py`**
 
 ```python
 # Pseudo code:

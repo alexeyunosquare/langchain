@@ -30,7 +30,7 @@ Integration points:
 
 ### 5.1 Configure Tavily Client
 
-**File: `src/conversational_rag/agentic_rag/search.py`**
+**File: `src/agentic_rag/search.py`**
 
 ```python
 # Pseudo code:
@@ -125,7 +125,7 @@ class TavilySearchIntegration:
 
 ### 5.2 Integrate with Retrieval Node
 
-**File: `src/conversational_rag/agentic_rag/agent.py`**
+**File: `src/agentic_rag/agent.py`**
 
 Update retrieval to support Tavily:
 
@@ -169,7 +169,7 @@ def retrieve_documents_node(state: AgenticRagState) -> dict:
 
 ### 5.3 Add Query Refinement Strategy
 
-**File: `src/conversational_rag/agentic_rag/search.py`**
+**File: `src/agentic_rag/search.py`**
 
 ```python
 # Pseudo code:
@@ -216,7 +216,7 @@ class QueryRefiner:
 
 ### 5.4 Implement Hybrid Retrieval Strategy
 
-**File: `src/conversational_rag/agentic_rag/search.py`**
+**File: `src/agentic_rag/search.py`**
 
 ```python
 # Pseudo code:

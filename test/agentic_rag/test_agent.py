@@ -56,19 +56,26 @@ class TestAgenticRAGAgent:
     def test_agent_initialization(self, mock_llm, mock_retriever, mock_evaluator):
         """Test agent initializes with correct components."""
         agent = AgenticRAGAgent(
-            llm=mock_llm, retriever=mock_retriever, evaluator=mock_evaluator
+            llm=mock_llm,
+            local_retriever=mock_retriever,
+            evaluator=mock_evaluator,
+            use_hybrid_retrieval=False,
         )
 
         assert agent.llm is mock_llm
-        assert agent.retriever is mock_retriever
+        assert agent.local_retriever is mock_retriever
         assert agent.evaluator is mock_evaluator
         assert agent.state is not None
         assert agent.state.query == ""
+        assert agent.hybrid_retriever is None
 
     def test_agent_workflow_execution(self, mock_llm, mock_retriever, mock_evaluator):
         """Test agent can execute complete workflow."""
         agent = AgenticRAGAgent(
-            llm=mock_llm, retriever=mock_retriever, evaluator=mock_evaluator
+            llm=mock_llm,
+            local_retriever=mock_retriever,
+            evaluator=mock_evaluator,
+            use_hybrid_retrieval=False,
         )
 
         query = "What is LangChain?"
@@ -102,7 +109,10 @@ class TestAgenticRAGAgent:
         mock_retriever.invoke.side_effect = side_effect
 
         agent = AgenticRAGAgent(
-            llm=mock_llm, retriever=mock_retriever, evaluator=mock_evaluator
+            llm=mock_llm,
+            local_retriever=mock_retriever,
+            evaluator=mock_evaluator,
+            use_hybrid_retrieval=False,
         )
 
         query = "Test query"
@@ -121,9 +131,10 @@ class TestAgenticRAGAgent:
 
         agent = AgenticRAGAgent(
             llm=mock_llm,
-            retriever=mock_retriever,
+            local_retriever=mock_retriever,
             evaluator=mock_evaluator,
             max_iterations=2,
+            use_hybrid_retrieval=False,
         )
 
         query = "Test query"
@@ -134,7 +145,7 @@ class TestAgenticRAGAgent:
 
     def test_agent_error_handling_retrieval_failure(self, mock_llm, mock_retriever):
         """Test agent handles retrieval failures gracefully."""
-        mock_retriever.search.side_effect = Exception("Retrieval failed")
+        mock_retriever.invoke.side_effect = Exception("Retrieval failed")
 
         mock_evaluator = MagicMock(spec=RelevanceEvaluator)
         mock_evaluator.evaluate.return_value = EvaluationResult(
@@ -142,7 +153,10 @@ class TestAgenticRAGAgent:
         )
 
         agent = AgenticRAGAgent(
-            llm=mock_llm, retriever=mock_retriever, evaluator=mock_evaluator
+            llm=mock_llm,
+            local_retriever=mock_retriever,
+            evaluator=mock_evaluator,
+            use_hybrid_retrieval=False,
         )
 
         query = "Test query"
@@ -155,7 +169,10 @@ class TestAgenticRAGAgent:
     def test_agent_state_tracking(self, mock_llm, mock_retriever, mock_evaluator):
         """Test agent properly tracks state throughout workflow."""
         agent = AgenticRAGAgent(
-            llm=mock_llm, retriever=mock_retriever, evaluator=mock_evaluator
+            llm=mock_llm,
+            local_retriever=mock_retriever,
+            evaluator=mock_evaluator,
+            use_hybrid_retrieval=False,
         )
 
         query = "Test query"
@@ -171,7 +188,10 @@ class TestAgenticRAGAgent:
     def test_agent_conversation_history(self, mock_llm, mock_retriever, mock_evaluator):
         """Test agent maintains conversation history."""
         agent = AgenticRAGAgent(
-            llm=mock_llm, retriever=mock_retriever, evaluator=mock_evaluator
+            llm=mock_llm,
+            local_retriever=mock_retriever,
+            evaluator=mock_evaluator,
+            use_hybrid_retrieval=False,
         )
 
         # First query
@@ -188,7 +208,10 @@ class TestAgenticRAGAgent:
     def test_agent_streaming_output(self, mock_llm, mock_retriever, mock_evaluator):
         """Test agent supports streaming output."""
         agent = AgenticRAGAgent(
-            llm=mock_llm, retriever=mock_retriever, evaluator=mock_evaluator
+            llm=mock_llm,
+            local_retriever=mock_retriever,
+            evaluator=mock_evaluator,
+            use_hybrid_retrieval=False,
         )
 
         query = "Test query"

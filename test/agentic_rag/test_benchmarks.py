@@ -78,9 +78,10 @@ class TestPerformanceBenchmarks:
         config = AgenticRAGConfig(max_search_iterations=2)
         agent = AgenticRAGAgent(
             llm=mock_llm,
-            retriever=mock_retriever,
+            local_retriever=mock_retriever,
             evaluator=mock_evaluator,
             config=config,
+            use_hybrid_retrieval=False,
         )
 
         start_time = time.time()
@@ -99,9 +100,10 @@ class TestPerformanceBenchmarks:
         config = AgenticRAGConfig(max_search_iterations=1)
         agent = AgenticRAGAgent(
             llm=mock_llm,
-            retriever=mock_retriever,
+            local_retriever=mock_retriever,
             evaluator=mock_evaluator,
             config=config,
+            use_hybrid_retrieval=False,
         )
 
         # Process multiple queries sequentially
@@ -134,9 +136,10 @@ class TestPerformanceBenchmarks:
         config = AgenticRAGConfig(max_search_iterations=1)
         agent = AgenticRAGAgent(
             llm=mock_llm,
-            retriever=mock_retriever,
+            local_retriever=mock_retriever,
             evaluator=mock_evaluator,
             config=config,
+            use_hybrid_retrieval=False,
         )
 
         # Process with large document set
