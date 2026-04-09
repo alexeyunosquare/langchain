@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from langchain_core.documents import Document as LangChainDocument
 from langchain_core.language_models import BaseLanguageModel
 
 from .state import Document
@@ -25,17 +26,26 @@ class EvaluationResult:
         confidence: Confidence score in the evaluation (0-1)
         reason: Explanation of the evaluation decision
         document_ids: List of document IDs that were evaluated
+        quality_score: Overall quality score (0-1) - added for consistency
+        should_rerun_search: Whether to search again
+        rerun_reason: Reason for rerun if applicable
+        documents_evaluated: List of evaluated documents
     """
 
     is_relevant: bool
     confidence: float = 0.0
     reason: Optional[str] = None
     document_ids: List[str] = field(default_factory=list)
+    quality_score: float = 0.5
+    should_rerun_search: bool = False
+    rerun_reason: Optional[str] = None
+    documents_evaluated: List[Document] = field(default_factory=list)
 
     def __str__(self) -> str:
         return (
             f"EvaluationResult(is_relevant={self.is_relevant}, "
-            f"confidence={self.confidence:.2f}, reason='{self.reason}')"
+            f"confidence={self.confidence:.2f}, reason='{self.reason}', "
+            f"quality_score={self.quality_score:.2f})"
         )
 
 
@@ -96,7 +106,7 @@ Respond ONLY with valid JSON, no other text.
     def evaluate(
         self,
         query: str,
-        documents: List[Document],
+        documents: List[LangChainDocument],
     ) -> EvaluationResult:
         """
         Evaluate whether documents are relevant to the query.
@@ -121,8 +131,18 @@ Respond ONLY with valid JSON, no other text.
                 reason="No documents provided",
             )
 
+        # Convert LangChainDocument to internal Document format for processing
+        internal_docs = [
+            Document(
+                page_content=doc.page_content,
+                metadata=doc.metadata if hasattr(doc, "metadata") else {},
+                score=getattr(doc, "score", None),
+            )
+            for doc in documents
+        ]
+
         # Format documents for evaluation
-        doc_text = "\n\n".join([doc.page_content for doc in documents])
+        doc_text = "\n\n".join([doc.page_content for doc in internal_docs])
 
         # Create evaluation prompt
         prompt = self.EVALUATION_PROMPT.format(
@@ -140,10 +160,20 @@ Respond ONLY with valid JSON, no other text.
             # Parse JSON response
             result = self._parse_evaluation_response(content)
 
-            # Add document IDs to result
+            # Add document IDs to result - extract from original LangChain documents
             result.document_ids = [
                 doc.metadata.get("id", str(i)) for i, doc in enumerate(documents)
             ]
+
+            # Also track internal Document objects evaluated
+            result.documents_evaluated = internal_docs.copy()
+
+            # Set should_rerun_search based on is_relevant
+            result.should_rerun_search = not result.is_relevant
+
+            # Calculate quality_score from confidence if not provided
+            if result.quality_score == 0.5 and result.confidence > 0:
+                result.quality_score = result.confidence
 
             return result
 
@@ -212,8 +242,8 @@ Respond ONLY with valid JSON, no other text.
     def get_relevant_documents(
         self,
         query: str,
-        documents: List[Document],
-    ) -> List[Document]:
+        documents: List[LangChainDocument],
+    ) -> List[LangChainDocument]:
         """
         Filter documents to only those marked as relevant.
 

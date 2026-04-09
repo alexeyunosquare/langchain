@@ -16,13 +16,9 @@ from .config import AgenticRAGConfig
 from .corrective import (
     AnswerValidator,
     CorrectionEngine,
-    CorrectionEngineConfig,
     CorrectionResult,
     CorrectionStrategy,
     CorrectiveRAG,
-    ValidationDetail,
-    ValidationResult,
-    ValidationStatus,
 )
 from .evaluator import EvaluationResult, RelevanceEvaluator
 from .factory import create_agentic_rag_agent, create_default_agentic_rag
@@ -34,8 +30,8 @@ from .graph import (
 )
 from .search import (
     DocumentResult,
-    HybridRetriever,
     HybridRetrievalResult,
+    HybridRetriever,
     QueryRefiner,
     SearchResults,
     TavilySearch,
@@ -69,9 +65,8 @@ __all__ = [
     "ValidationStatus",
     "ValidationDetail",
     "CorrectionEngine",
-    "CorrectionEngineConfig",
-    "CorrectionStrategy",
     "CorrectionResult",
+    "CorrectionStrategy",
     # Search (Phase 5)
     "TavilySearch",
     "TavilySearchIntegration",

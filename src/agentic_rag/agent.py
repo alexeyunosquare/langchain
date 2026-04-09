@@ -7,6 +7,7 @@ generation with self-correction capabilities.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Generator, List, Optional
 
 from langchain_core.language_models import BaseLanguageModel
@@ -15,14 +16,16 @@ from langchain_core.retrievers import BaseRetriever
 from .config import AgenticRAGConfig
 from .corrective import CorrectiveRAG
 from .evaluator import EvaluationResult, RelevanceEvaluator
-from .search import (
-    DocumentResult,
-    HybridRetrievalResult,
-    HybridRetriever,
-    TavilySearch,
-    TavilySearchIntegration,
+from .search import HybridRetrievalResult, HybridRetriever, QueryRefiner, TavilySearch
+from .state import (
+    AgentState,
+    Document,
+    MessageRole,
+    SearchHistoryEntry,
+    ValidationDetailModel,
+    ValidationResultModel,
+    ValidationStatus,
 )
-from .state import AgentState, Document, MessageRole
 
 
 @dataclass
@@ -90,6 +93,30 @@ Context:
 Answer:
 """
 
+    REFINEMENT_PROMPT = """
+You are an expert query refinement assistant. The previous search for:
+
+"{previous_query}"
+
+Failed to return relevant documents.
+Evaluation reason: {reason}
+Current iteration: {iteration}
+
+Analyze why the previous search failed and generate a refined query that:
+1. Addresses the specific issue mentioned in the reason
+2. Uses more specific or alternative keywords
+3. Adjusts the scope (broader or narrower as appropriate)
+4. Maintains the original intent
+
+Consider:
+- Synonyms or related terms
+- More precise language
+- Additional context or constraints
+- Different phrasing
+
+Return ONLY the refined query, nothing else.
+"""
+
     def __init__(
         self,
         llm: BaseLanguageModel,
@@ -120,16 +147,16 @@ Answer:
         self.local_retriever = local_retriever
         self.evaluator = evaluator
         self.tavily_search = tavily_search
-        self.corrective = corrective or CorrectiveRAG(llm=llm)
         self.config = config or AgenticRAGConfig()
         if max_iterations is not None:
             self.config.max_search_iterations = max_iterations
 
+        # Initialize corrective RAG with structured output
+        self.corrective = corrective or CorrectiveRAG(llm=llm)
+
         # Initialize hybrid retriever if Tavily is available
         self.use_hybrid_retrieval = use_hybrid_retrieval
         if use_hybrid_retrieval and tavily_search:
-            from .search import QueryRefiner
-
             query_refiner = QueryRefiner(llm=llm)
             self.hybrid_retriever = HybridRetriever(
                 local_retriever=local_retriever,
@@ -140,7 +167,13 @@ Answer:
         else:
             self.hybrid_retriever = None
 
-        self.state = AgentState()
+        # Initialize state with Pydantic model
+        self.state = AgentState(
+            query="",
+            original_query=None,
+            session_id=f"session_{datetime.now().isoformat()}",
+            messages=[],
+        )
 
     def run(
         self,
@@ -160,8 +193,15 @@ Answer:
         max_iterations = max_iterations or self.config.max_search_iterations
 
         # Initialize state
-        self.state = AgentState(query=query)
+        original_query = query
+        self.state = AgentState(
+            query=query,
+            original_query=original_query,
+            session_id=f"session_{datetime.now().isoformat()}",
+            messages=[],
+        )
         self.state.add_message(MessageRole.USER, query)
+        self.state.update_timestamp("query_received")
 
         search_count = 0
         iteration = 0
@@ -171,6 +211,15 @@ Answer:
             while iteration < max_iterations:
                 iteration += 1
                 self.state.iteration = iteration
+                self.state.update_timestamp(f"iteration_{iteration}")
+
+                # Track search in history
+                search_entry = SearchHistoryEntry(
+                    iteration=iteration,
+                    query=query,
+                    document_count=0,  # Will be updated after retrieval
+                    evaluation=None,
+                )
 
                 # Retrieve documents
                 if self.use_hybrid_retrieval and self.hybrid_retriever:
@@ -192,9 +241,19 @@ Answer:
                 )
                 self.state.documents = documents
 
-                # Evaluate relevance
+                # Update search history entry with actual count
+                search_entry.document_count = len(documents)
+
+                # Evaluate documents
                 evaluation = self.evaluator.evaluate(query, documents)
                 self.state.is_relevant = evaluation.is_relevant
+                self.state.relevance_scores.append(evaluation.quality_score)
+                self.state.update_timestamp(f"evaluation_{iteration}")
+
+                # Record search in history
+                search_entry.evaluation = evaluation.to_dict()
+                search_entry.document_count = len(documents)
+                self.state.search_history.append(search_entry)
 
                 # Check if we should continue searching
                 if not self.evaluator.should_search_again(evaluation):
@@ -202,9 +261,18 @@ Answer:
                     final_documents = documents
                     break
 
-                # Documents not relevant, prepare for next search
-                query = self._refine_query(query, evaluation)
+                # Documents not relevant, refine query and continue
+                query = self._refine_query(query, evaluation, iteration)
                 self.state.search_query = query
+                self.state.update_timestamp("query_refined")
+
+                # Check max search count
+                if self.state.search_count >= max_iterations:
+                    self.state.rerun_reason = (
+                        f"Max iterations ({max_iterations}) reached"
+                    )
+                    self.state.should_rerun = True
+                    break
 
             # Generate answer with retrieved documents
             answer = self._generate_answer(
@@ -212,36 +280,37 @@ Answer:
                 documents=final_documents,
             )
 
-            # Validate and potentially correct answer
-            is_hallucinated, hallucination_score = self.corrective.check_hallucination(
-                answer,
-                final_documents,
+            # Validate and potentially correct answer with structured output
+            validation = self._validate_and_correct_answer(
+                answer=answer, documents=final_documents, query=query
             )
-            self.state.hallucination_score = hallucination_score
-
-            if is_hallucinated:
-                answer = self.corrective.correct_answer(answer, final_documents)
-                self.state.correction_triggered = True
 
             self.state.answer = answer
-            self.state.validation_passed = True
+            self.state.validation_result = validation
+            self.state.answer_quality_score = validation.quality_score
+            self.state.update_timestamp("answer_finalized")
+
+            # Track total document counts
+            tavily_count = 0
+            local_count = 0
+            for doc in final_documents:
+                source = doc.metadata.get("source", "local")
+                if source == "tavily":
+                    tavily_count += 1
+                else:
+                    local_count += 1
 
             return AgentResult(
                 answer=answer,
                 documents=final_documents,
                 search_count=search_count,
-                validation_passed=True,
+                validation_passed=validation.status
+                in [ValidationStatus.VALID, ValidationStatus.PARTIALLY_VALID],
                 search_iterations=iteration,
-                hallucination_score=hallucination_score,
-                tavily_used=search_result.tavily_count > 0
-                if self.use_hybrid_retrieval
-                else False,
-                tavily_document_count=search_result.tavily_count
-                if self.use_hybrid_retrieval
-                else 0,
-                local_document_count=search_result.local_count
-                if self.use_hybrid_retrieval
-                else len(final_documents),
+                hallucination_score=1.0 - validation.quality_score,
+                tavily_used=tavily_count > 0,
+                tavily_document_count=tavily_count,
+                local_document_count=local_count,
                 total_documents=len(final_documents),
             )
 
@@ -249,6 +318,7 @@ Answer:
             # Handle errors gracefully
             self.state.error = str(e)
             self.state.answer = f"Error processing query: {str(e)}"
+            self.state.update_timestamp("error_occurred")
 
             return AgentResult(
                 answer=self.state.answer,
@@ -293,9 +363,7 @@ Answer:
         except Exception:
             return []
 
-    def _retrieve_documents_hybrid(
-        self, query: str
-    ) -> HybridRetrievalResult:
+    def _retrieve_documents_hybrid(self, query: str) -> HybridRetrievalResult:
         """
         Retrieve documents using hybrid retriever (local + Tavily).
 
@@ -336,9 +404,7 @@ Answer:
 
         return result
 
-    def _get_search_count_from_hybrid(
-        self, result: HybridRetrievalResult
-    ) -> int:
+    def _get_search_count_from_hybrid(self, result: HybridRetrievalResult) -> int:
         """
         Get search count from hybrid retrieval result.
 
@@ -346,7 +412,7 @@ Answer:
             result: HybridRetrievalResult
 
         Returns:
-            Search count (1 for local, 1 for Tavily if used)
+            Search count (1 for local, 2 if Tavily also used)
         """
         count = 1  # Local search always happens
         if result.tavily_count > 0:
@@ -459,21 +525,125 @@ Answer:
     def _refine_query(
         self,
         query: str,
-        evaluation: EvaluationResult,  # noqa: ARG002
+        evaluation: EvaluationResult,
+        iteration: int,
     ) -> str:
         """
-        Refine query for next search iteration.
+        Refine query for next search iteration using LLM.
 
         Args:
             query: Original query
             evaluation: Evaluation result explaining why search failed
+            iteration: Current iteration number
 
         Returns:
             Refined query for better results
         """
-        # For now, use the original query
-        # Could be extended to use LLM to generate better query
-        return query
+        if not evaluation.reason:
+            # No reason provided, return original query
+            return query
+
+        # Use LLM to generate better query based on evaluation feedback
+        refinement_prompt = self.REFINEMENT_PROMPT.format(
+            previous_query=query, reason=evaluation.reason, iteration=iteration
+        )
+
+        try:
+            response = self.llm.invoke(refinement_prompt)
+            refined_query = (
+                response.content if hasattr(response, "content") else str(response)
+            ).strip()
+
+            # Clean up the refined query
+            if refined_query.startswith('"') or refined_query.startswith("'"):
+                refined_query = refined_query[1:-1]
+
+            return refined_query
+
+        except Exception as e:
+            print(f"Query refinement failed: {e}")
+            # Fallback: return original query
+            return query
+
+    def _validate_and_correct_answer(
+        self,
+        answer: str,
+        documents: List[Document],
+        query: str,
+    ) -> ValidationResultModel:
+        """
+        Validate answer and apply corrections using structured output.
+
+        Args:
+            answer: Generated answer
+            documents: Documents used
+            query: Original query
+
+        Returns:
+            ValidationResultModel with structured validation result
+        """
+        try:
+            # Use corrective RAG with structured output
+            validation = self.corrective.answer_validator.validate(
+                answer=answer, documents=documents, query=query
+            )
+
+            # Convert to Pydantic model
+            return self._convert_validation_result(validation)
+
+        except Exception as e:
+            # Fallback to basic validation
+            print(f"Validation failed: {e}")
+            return ValidationResultModel(
+                status=ValidationStatus.PARTIALLY_VALID,
+                quality_score=0.7,
+                validation_details=[
+                    ValidationDetailModel(
+                        field="general",
+                        is_valid=True,
+                        message="Basic validation passed",
+                    )
+                ],
+                issues=["Error during detailed validation"],
+            )
+
+    def _convert_validation_result(self, validation: dict) -> ValidationResultModel:
+        """
+        Convert validation result to Pydantic model.
+
+        Args:
+            validation: Dictionary validation result
+
+        Returns:
+            ValidationResultModel
+        """
+        status = ValidationStatus.VALID
+        if validation.get("status") == "PARTIALLY_VALID":
+            status = ValidationStatus.PARTIALLY_VALID
+        elif validation.get("status") == "INVALID":
+            status = ValidationStatus.INVALID
+        elif validation.get("status") == "HALLUCINATED":
+            status = ValidationStatus.HALLUCINATED
+
+        quality_score = validation.get("quality_score", 0.7)
+
+        validation_details = []
+        for detail in validation.get("validation_details", []):
+            validation_details.append(
+                ValidationDetailModel(
+                    field=detail.get("field", "unknown"),
+                    is_valid=detail.get("is_valid", False),
+                    message=detail.get("message", ""),
+                )
+            )
+
+        return ValidationResultModel(
+            status=status,
+            quality_score=quality_score,
+            validation_details=validation_details,
+            issues=validation.get("issues", []),
+            corrective_action=validation.get("corrective_action"),
+        )
 
     def stream(
         self,

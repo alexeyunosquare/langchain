@@ -9,7 +9,7 @@ system efficiency metrics.
 import re
 import string
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import numpy as np
 from langchain_core.documents import Document as LangChainDocument
@@ -49,10 +49,7 @@ class AnswerMetrics:
             "rouge_l_f1": 0.2,
             "llm_judge_score": 0.4,
         }
-        return sum(
-            getattr(self, k, 0.0) * v
-            for k, v in weights.items()
-        )
+        return sum(getattr(self, k, 0.0) * v for k, v in weights.items())
 
     def __str__(self) -> str:
         return (
@@ -89,9 +86,11 @@ class RetrievalMetrics:
         """Calculate F1 score for retrieval (harmonic mean)."""
         if self.precision_at_k + self.recall_at_k == 0:
             return 0.0
-        return 2 * (
-            self.precision_at_k * self.recall_at_k
-        ) / (self.precision_at_k + self.recall_at_k)
+        return (
+            2
+            * (self.precision_at_k * self.recall_at_k)
+            / (self.precision_at_k + self.recall_at_k)
+        )
 
     def __str__(self) -> str:
         return (
@@ -193,7 +192,6 @@ class MetricsCalculator:
         self,
         predicted: str,
         ground_truth: str,
-        query: Optional[str] = None,
     ) -> AnswerMetrics:
         """Calculate answer quality metrics."""
         pred_normalized = self._normalize_text(predicted)
@@ -226,14 +224,10 @@ class MetricsCalculator:
         if not retrieved_docs or not gold_docs:
             return RetrievalMetrics(k=top_k)
 
-        retrieved_ids = set(
-            doc.metadata.get("id", i)
-            for i, doc in enumerate(retrieved_docs[:top_k])
-        )
-        gold_ids = set(
-            doc.metadata.get("id", i)
-            for i, doc in enumerate(gold_docs)
-        )
+        retrieved_ids = {
+            doc.metadata.get("id", i) for i, doc in enumerate(retrieved_docs[:top_k])
+        }
+        gold_ids = {doc.metadata.get("id", i) for i, doc in enumerate(gold_docs)}
 
         hits = len(retrieved_ids & gold_ids)
         precision = hits / len(retrieved_ids) if retrieved_ids else 0.0
@@ -323,7 +317,9 @@ class MetricsCalculator:
         """Evaluate a single query and return all metrics."""
         answer_metrics = self.calculate_answer_metrics(answer, ground_truth, query)
         retrieval_metrics = self.calculate_retrieval_metrics(retrieved_docs, gold_docs)
-        hallucination_metrics = self.calculate_hallucination_metrics(answer, retrieved_docs)
+        hallucination_metrics = self.calculate_hallucination_metrics(
+            answer, retrieved_docs
+        )
 
         return {
             "query": query,
@@ -416,10 +412,7 @@ class MetricsCalculator:
         if not retrieved or not relevant:
             return 0.0
 
-        relevant_ids = set(
-            doc.metadata.get("id", i)
-            for i, doc in enumerate(relevant)
-        )
+        relevant_ids = {doc.metadata.get("id", i) for i, doc in enumerate(relevant)}
 
         dcg = 0.0
         for i, doc in enumerate(retrieved[:k]):
@@ -430,10 +423,7 @@ class MetricsCalculator:
                 dcg += dcgi
 
         ideal_relevances = [1] * min(len(relevant_ids), k)
-        idcg = sum(
-            1 / np.log2(i + 2)
-            for i in range(len(ideal_relevances))
-        )
+        idcg = sum(1 / np.log2(i + 2) for i in range(len(ideal_relevances)))
 
         return dcg / idcg if idcg > 0 else 0.0
 
@@ -463,7 +453,7 @@ class MetricsCalculator:
         documents: List[Union[Document, LangChainDocument]],
     ) -> int:
         """Count claims in answer not supported by documents."""
-        sentences = [s.strip() for s in re.split(r'[.!?]+', answer)]
+        sentences = [s.strip() for s in re.split(r"[.!?]+", answer)]
         unsubstantiated = 0
         doc_text = " ".join([doc.page_content for doc in documents]).lower()
 
@@ -490,11 +480,12 @@ class MetricsCalculator:
             return {}
 
         f1_scores = [r["answer_metrics"].f1_score for r in query_results]
-        precision_scores = [r["retrieval_metrics"].precision_at_k for r in query_results]
+        precision_scores = [
+            r["retrieval_metrics"].precision_at_k for r in query_results
+        ]
         recall_scores = [r["retrieval_metrics"].recall_at_k for r in query_results]
         hallucination_rates = [
-            1 - r["hallucination_metrics"].fact_consistency_score
-            for r in query_results
+            1 - r["hallucination_metrics"].fact_consistency_score for r in query_results
         ]
         latencies = [r["performance_metrics"].total_latency_ms for r in query_results]
         overall_scores = [r["overall_score"] for r in query_results]

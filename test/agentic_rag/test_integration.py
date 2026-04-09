@@ -48,6 +48,7 @@ class TestAgenticRAGIntegration:
         mock = MagicMock()
         mock.invoke.return_value = BaseMessage(
             content="This is a valid answer based on the documents.",
+            type="human",
             role="assistant",
         )
         return mock
@@ -108,7 +109,6 @@ class TestAgenticRAGIntegration:
         """Test validation result parsing from LLM response."""
         from src.agentic_rag.corrective import (
             AnswerValidator,
-            ValidationDetail,
             ValidationResult,
             ValidationStatus,
         )
@@ -166,9 +166,7 @@ class TestAgenticRAGIntegration:
         )
 
         crag = CorrectiveRAG(llm=mock_llm)
-        documents = [
-            Document(page_content="Context", metadata={"source": "doc.txt"})
-        ]
+        documents = [Document(page_content="Context", metadata={"source": "doc.txt"})]
 
         corrected_answer = crag.validate_and_correct(
             answer="Original answer",
@@ -202,7 +200,7 @@ class TestAgenticRAGIntegration:
     @pytest.mark.integration
     def test_evaluate_relevance(self, mock_llm):
         """Test document relevance evaluation."""
-        from src.agentic_rag.evaluator import RelevanceEvaluator, EvaluationResult
+        from src.agentic_rag.evaluator import EvaluationResult, RelevanceEvaluator
         from src.agentic_rag.state import Document
 
         # Setup mock to return relevant evaluation
@@ -226,7 +224,7 @@ class TestAgenticRAGIntegration:
         assert result.confidence >= 0.7
 
     @pytest.mark.integration
-    def test_hybrid_retrieval_result(self, mock_llm, mock_retriever):
+    def test_hybrid_retrieval_result(self):
         """Test hybrid retrieval result structure."""
         from src.agentic_rag.search import HybridRetrievalResult
 
@@ -249,7 +247,7 @@ class TestAgenticRAGIntegration:
         assert result.search_time == 0.5
 
     @pytest.mark.integration
-    def test_search_results_structure(self, mock_llm):
+    def test_search_results_structure(self):
         """Test search results structure."""
         from src.agentic_rag.search import DocumentResult, SearchResults
 
@@ -271,7 +269,7 @@ class TestAgenticRAGIntegration:
         assert results.total_results == 1
 
     @pytest.mark.integration
-    def test_agent_result_structure(self, mock_llm, mock_retriever):
+    def test_agent_result_structure(self):
         """Test agent result structure."""
         from src.agentic_rag.agent import AgentResult
         from src.agentic_rag.state import Document

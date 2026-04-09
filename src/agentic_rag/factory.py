@@ -11,7 +11,7 @@ Phase 6: Integration and Optimization
 """
 
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.retrievers import BaseRetriever
@@ -20,12 +20,7 @@ from .agent import AgenticRAGAgent
 from .config import AgenticRAGConfig
 from .corrective import CorrectiveRAG
 from .evaluator import RelevanceEvaluator
-from .search import (
-    HybridRetriever,
-    QueryRefiner,
-    TavilySearch,
-    TavilySearchIntegration,
-)
+from .search import HybridRetriever, QueryRefiner, TavilySearch, TavilySearchIntegration
 
 
 def create_agentic_rag_agent(

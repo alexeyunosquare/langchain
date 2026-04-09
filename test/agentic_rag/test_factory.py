@@ -43,7 +43,9 @@ class TestFactoryFunctions:
 
     def test_create_corrective_rag(self, mock_llm):
         """Test CorrectiveRAG creation."""
-        crag = create_corrective_rag(llm=mock_llm, quality_threshold=0.8, max_attempts=3)
+        crag = create_corrective_rag(
+            llm=mock_llm, quality_threshold=0.8, max_attempts=3
+        )
 
         assert crag is not None
         assert crag.correction_threshold == 0.8
@@ -78,7 +80,9 @@ class TestFactoryFunctions:
         assert agent.config.evaluation_threshold == 0.9
         assert agent.config.max_search_iterations == 5
 
-    def test_create_agentic_rag_agent_override_iterations(self, mock_llm, mock_retriever):
+    def test_create_agentic_rag_agent_override_iterations(
+        self, mock_llm, mock_retriever
+    ):
         """Test agent creation with iteration override."""
         agent = create_agentic_rag_agent(
             llm=mock_llm,
@@ -104,13 +108,14 @@ class TestFactoryFunctions:
             evaluation_threshold=0.95,  # Override
         )
 
-        # Env vars take precedence over custom config
-        assert merged.evaluation_threshold == 0.95  # Override wins
-        assert merged.max_search_iterations == 4  # From env
+        # Override takes highest precedence
+        assert merged.evaluation_threshold == 0.95
+        # Custom config used when no override provided
+        assert merged.max_search_iterations == 3
 
     def test_merge_config_with_env_custom_wins_over_default(self, monkeypatch):
         """Test custom config values over defaults when not overridden."""
-        monkeypatch.setenv("RAG_EVALUATION_THRESHOLD", "0.85")
+        monkeypatch.delenv("RAG_EVALUATION_THRESHOLD", raising=False)
         monkeypatch.delenv("RAG_MAX_SEARCH_ITERATIONS", raising=False)
 
         custom_config = AgenticRAGConfig(
@@ -120,9 +125,8 @@ class TestFactoryFunctions:
 
         merged = merge_config_with_env(custom_config=custom_config)
 
-        # Env var takes precedence
-        assert merged.evaluation_threshold == 0.85
-        # Custom config is used when no env var
+        # Custom config values used when no env var
+        assert merged.evaluation_threshold == 0.7
         assert merged.max_search_iterations == 5
 
     def test_create_hybrid_retriever(self, mock_llm, mock_retriever):

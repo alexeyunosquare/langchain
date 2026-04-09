@@ -167,9 +167,9 @@ class TestConversationMemory:
         result1 = rag_chain("What is Docker?")
         assert "answer" in result1
         answer1 = result1["answer"].lower()
-        assert any(word in answer1 for word in ["docker", "container", "platform"]), (
-            f"First answer should be about Docker. Got: {result1['answer']}"
-        )
+        assert any(
+            word in answer1 for word in ["docker", "container", "platform"]
+        ), f"First answer should be about Docker. Got: {result1['answer']}"
 
         # Follow-up question using pronoun (relies on memory)
         result2 = rag_chain("What are its benefits?")
@@ -258,9 +258,9 @@ class TestSourceDocuments:
 
         # Verify source documents are returned
         assert "source_documents" in result, "Response should include source documents"
-        assert len(result["source_documents"]) > 0, (
-            "Should return at least one source document"
-        )
+        assert (
+            len(result["source_documents"]) > 0
+        ), "Should return at least one source document"
 
 
 class TestEdgeCases:

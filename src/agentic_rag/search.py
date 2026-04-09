@@ -4,12 +4,19 @@ Tavily Search Integration for Agentic RAG.
 This module provides the TavilySearch class for integrating web search
 capabilities using Tavily API, enabling the agent to search external
 sources when local documents are insufficient.
+
+Enhanced with proper hybrid retrieval integration and query refinement.
 """
 
 import os
+import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+if TYPE_CHECKING:
+    from langchain_core.retrievers import BaseRetriever
+
+from langchain_core.documents import Document
 from langchain_core.language_models import BaseLanguageModel
 
 
@@ -243,6 +250,7 @@ class TavilySearch:
         self,
         query: str,
         iterations: int = 3,
+        query_refiner: Optional[Any] = None,
     ) -> SearchResults:
         """
         Perform multiple searches with query refinement.
@@ -250,6 +258,7 @@ class TavilySearch:
         Args:
             query: Initial search query
             iterations: Number of refinement iterations
+            query_refiner: Optional query refiner (uses default if None)
 
         Returns:
             SearchResults with aggregated results
@@ -258,7 +267,9 @@ class TavilySearch:
         seen_urls = set()
 
         current_query = query
-        for _i in range(iterations):
+        refiner = query_refiner or self._create_default_refiner()
+
+        for i in range(iterations):
             results = self.search(current_query)
 
             # Add new documents
@@ -271,14 +282,33 @@ class TavilySearch:
             if len(all_documents) >= 10:
                 break
 
-            # Could refine query here based on results
-            # For now, just continue with original query
+            # Refine query if not last iteration
+            if i < iterations - 1:
+                feedback = "Continuing search for more information"
+                current_query = refiner.refine(
+                    current_query,
+                    feedback,
+                    [
+                        {
+                            "query": current_query,
+                            "documents": [d.to_dict() for d in results.documents],
+                        }
+                    ],
+                )
 
         return SearchResults(
             query=query,
             documents=all_documents,
             total_results=len(all_documents),
         )
+
+    def _create_default_refiner(self) -> "QueryRefiner":
+        """Create a default QueryRefiner instance."""
+        from .search import QueryRefiner
+
+        # Try to get LLM from globals or return a basic refiner
+        return QueryRefiner(llm=None)
+
 
 class QueryRefiner:
     """
@@ -310,15 +340,15 @@ and generate a refined query that addresses the issue. Consider:
 Generate ONLY the refined query, nothing else.
 """
 
-    def __init__(self, llm: BaseLanguageModel) -> None:
+    def __init__(self, llm: Optional[BaseLanguageModel] = None) -> None:
         """
         Initialize QueryRefiner.
 
         Args:
-            llm: Language model for query refinement
+            llm: Language model for query refinement (optional, uses heuristic if None)
         """
         self.llm = llm
-        self._refinement_chain = None
+        self._default_queries = []
 
     def refine(
         self,
@@ -339,8 +369,10 @@ Generate ONLY the refined query, nothing else.
         """
         search_history_str = (
             "\n".join(
-                [f"- Query: {h['query']}, Results: {len(h.get('documents', []))}"
-                 for h in (search_history or [])]
+                [
+                    f"- Query: {h['query']}, Results: {len(h.get('documents', []))}"
+                    for h in (search_history or [])
+                ]
             )
             or "No previous searches"
         )
@@ -351,13 +383,216 @@ Generate ONLY the refined query, nothing else.
             search_history=search_history_str,
         )
 
-        response = self.llm.invoke(prompt)
-        refined_query = (
-            response.content if hasattr(response, "content") else str(response)
-        )
+        if self.llm:
+            response = self.llm.invoke(prompt)
+            refined_query = (
+                response.content if hasattr(response, "content") else str(response)
+            ).strip()
+        else:
+            # Heuristic-based refinement
+            refined_query = self._heuristic_refine(previous_query, search_feedback)
 
         # Clean up the response
-        return refined_query.strip()
+        return self._clean_query(refined_query)
+
+    def _clean_query(self, query: str) -> str:
+        """Clean up a query string by removing quotes and extra whitespace."""
+        if not query:
+            return query
+        query = query.strip()
+        if query.startswith('"') or query.startswith("'"):
+            query = query[1:-1]
+        return query.strip()
+
+    def _heuristic_refine(self, query: str, feedback: str) -> str:
+        """Apply heuristic-based query refinement without LLM.
+
+        Args:
+            query: Original search query
+            feedback: Feedback explaining why previous search failed
+
+        Returns:
+            Refined query that addresses the feedback
+        """
+        # Use feedback to guide refinement strategy
+        feedback_lower = feedback.lower()
+
+        # Strategy 1: If feedback mentions "irrelevant" or "not relevant", make more specific
+        if "irrelevant" in feedback_lower or "not relevant" in feedback_lower:
+            return self._make_query_more_specific(query)
+
+        # Strategy 2: If feedback mentions "no results" or "empty", try broader terms
+        if (
+            "no results" in feedback_lower
+            or "empty" in feedback_lower
+            or "none found" in feedback_lower
+        ):
+            return self._expand_query(query)
+
+        # Strategy 3: If feedback mentions "limited" or "few", adjust scope
+        if "limited" in feedback_lower or "few" in feedback_lower:
+            return self._adjust_scope(query)
+
+        # Default: Use keyword extraction with stopword removal
+        words = query.lower().split()
+
+        # Common words to remove
+        stopwords = {
+            "the",
+            "a",
+            "an",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "must",
+            "shall",
+            "can",
+            "need",
+            "dare",
+            "ought",
+            "used",
+            "to",
+            "of",
+            "in",
+            "for",
+            "on",
+            "with",
+            "at",
+            "by",
+            "from",
+            "up",
+            "about",
+            "into",
+            "through",
+            "during",
+            "before",
+            "after",
+            "above",
+            "below",
+            "between",
+            "under",
+            "again",
+            "further",
+            "then",
+            "once",
+            "here",
+            "there",
+            "when",
+            "where",
+            "why",
+            "how",
+            "all",
+            "each",
+            "few",
+            "more",
+            "most",
+            "other",
+            "some",
+            "such",
+            "no",
+            "nor",
+            "not",
+            "only",
+            "own",
+            "same",
+            "so",
+            "than",
+            "too",
+            "very",
+            "s",
+            "t",
+            "just",
+            "don",
+            "now",
+        }
+
+        # Filter out stopwords
+        keywords = [w for w in words if w not in stopwords and len(w) > 2]
+
+        if len(keywords) < 2:
+            # If too few keywords, try different phrasing
+            alternatives = self._generate_alternatives(query)
+            return alternatives[0] if alternatives else query
+
+        # Reconstruct query with keywords
+        refined = " ".join(keywords)
+
+        return refined
+
+    def _make_query_more_specific(self, query: str) -> str:
+        """Make query more specific by adding qualifiers.
+
+        Args:
+            query: Original query
+
+        Returns:
+            More specific query
+        """
+        # Add specificity keywords to narrow down results
+        specifics = ["specifically", "detailed", "comprehensive", "in depth"]
+        return f"{query} {specifics[0]}"
+
+    def _expand_query(self, query: str) -> str:
+        """Expand query with broader terms.
+
+        Args:
+            query: Original query
+
+        Returns:
+            Broader query
+        """
+        # Add broadening keywords
+        broadenings = ["overview", "general", "introduction to"]
+        return f"{broadenings[2]} {query}"
+
+    def _adjust_scope(self, query: str) -> str:
+        """Adjust query scope based on result count.
+
+        Args:
+            query: Original query
+
+        Returns:
+            Adjusted query
+        """
+        # Remove limiting qualifiers if present
+        limiters = ["only", "just", "exactly", "specifically"]
+        words = query.split()
+        filtered_words = [w for w in words if w.lower() not in limiters]
+        return " ".join(filtered_words) if filtered_words else query
+
+    def _generate_alternatives(self, query: str) -> List[str]:
+        """Generate alternative query phrasings."""
+        alternatives = [query]
+
+        # Add variations
+        words = query.split()
+        if len(words) > 1:
+            # Try different word orders
+            alternatives.append(" ".join(reversed(words)))
+
+            # Try with "and" or "or"
+            if "and" not in query.lower():
+                alternatives.append(" and ".join(words))
+            if "or" not in query.lower():
+                alternatives.append(" or ".join(words))
+
+        return list(set(alternatives))
 
     def suggest_alternative_keywords(self, query: str) -> List[str]:
         """
@@ -369,8 +604,6 @@ Generate ONLY the refined query, nothing else.
         Returns:
             List of alternative keyword suggestions
         """
-        # For now, return simple variations
-        # Could be extended with LLM for sophisticated suggestions
         words = query.lower().split()
         variations = [query]
 
@@ -380,17 +613,18 @@ Generate ONLY the refined query, nothing else.
 
         # Add variations with synonyms (basic implementation)
         synonym_map = {
-            "how": "ways to",
-            "what": "explain",
-            "why": "reason for",
-            "when": "time of",
-            "where": "location of",
-            "which": "select from",
+            "how": ["ways to", "methods of", "approaches to"],
+            "what": ["explain", "describe", "define"],
+            "why": ["reason for", "causes of", "factors behind"],
+            "when": ["time of", "date of", "period of"],
+            "where": ["location of", "situated at", "found in"],
+            "which": ["select from", "choose between", "determine which"],
         }
 
-        for key, value in synonym_map.items():
+        for key, values in synonym_map.items():
             if key in words:
-                variations.append(query.replace(key, value, 1))
+                for value in values:
+                    variations.append(query.replace(key, value, 1))
 
         return list(set(variations))
 
@@ -444,7 +678,7 @@ class HybridRetrievalResult:
         error: Error message if any
     """
 
-    documents: List[Any] = field(default_factory=list)
+    documents: List[Document] = field(default_factory=list)
     local_count: int = 0
     tavily_count: int = 0
     search_time: float = 0.0
@@ -469,7 +703,7 @@ class HybridRetriever:
 
     def __init__(
         self,
-        local_retriever: Any,
+        local_retriever: "BaseRetriever",
         tavily_search: TavilySearch,
         query_refiner: Optional[QueryRefiner] = None,
         use_tavily_fallback: bool = True,
@@ -489,9 +723,7 @@ class HybridRetriever:
         """
         self.local_retriever = local_retriever
         self.tavily_search = tavily_search
-        self.query_refiner = query_refiner or QueryRefiner(
-            llm=type(self).__init__.__globals__.get("llm_mock", None)
-        )
+        self.query_refiner = query_refiner or QueryRefiner(llm=None)
         self.use_tavily_fallback = use_tavily_fallback
         self.tavily_priority = tavily_priority
         self.local_min_score = local_min_score
@@ -517,8 +749,6 @@ class HybridRetriever:
         Returns:
             HybridRetrievalResult with combined documents
         """
-        import time
-
         start_time = time.time()
 
         try:
@@ -526,9 +756,7 @@ class HybridRetriever:
             local_docs = self._retrieve_local(query, max_results=max_local_results)
 
             # Step 2: Evaluate local results
-            need_tavily = self._should_use_tavily(
-                local_docs, eval_feedback, search_history
-            )
+            need_tavily = self._should_use_tavily(local_docs, eval_feedback)
 
             # Step 3: Tavily retrieval if needed
             tavily_docs = []
@@ -568,9 +796,7 @@ class HybridRetriever:
                 error=str(e),
             )
 
-    def _retrieve_local(
-        self, query: str, max_results: int = 5
-    ) -> List[Dict[str, Any]]:
+    def _retrieve_local(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """
         Retrieve documents from local source.
 
@@ -607,7 +833,6 @@ class HybridRetriever:
         self,
         local_docs: List[Dict[str, Any]],
         eval_feedback: Optional[Dict[str, Any]],
-        search_history: Optional[List[Dict[str, Any]]],
     ) -> bool:
         """
         Determine if Tavily search should be used.
@@ -615,7 +840,6 @@ class HybridRetriever:
         Args:
             local_docs: Local document results
             eval_feedback: Evaluation feedback
-            search_history: Search history
 
         Returns:
             True if Tavily should be used
@@ -630,16 +854,13 @@ class HybridRetriever:
             return True
 
         # Use Tavily if evaluation suggests it
-        if eval_feedback and eval_feedback.get("should_search_again", False):
-            return True
-
-        return False
+        return bool(eval_feedback and eval_feedback.get("should_search_again", False))
 
     def _merge_and_rank(
         self,
         local_docs: List[Dict[str, Any]],
         tavily_docs: List[Any],
-    ) -> List[Any]:
+    ) -> List[Document]:
         """
         Merge local and Tavily documents with appropriate ranking.
 
@@ -648,40 +869,58 @@ class HybridRetriever:
             tavily_docs: Tavily document results
 
         Returns:
-            Combined and ranked documents
+            Combined and ranked List[Document]
         """
         # Convert Tavily docs to compatible format
         tavily_converted = []
         for doc in tavily_docs:
             if hasattr(doc, "to_dict"):
-                tavily_converted.append(
-                    {
-                        "content": doc.content,
-                        "metadata": {
-                            "url": doc.url,
-                            "title": doc.title,
-                            "source": "tavily",
-                        },
-                        "score": doc.score,
+                tavily_doc = Document(
+                    page_content=doc.content,
+                    metadata={
+                        "url": doc.url,
+                        "title": doc.title,
                         "source": "tavily",
-                        "document": doc,
-                    }
+                    },
+                    score=float(doc.score),
                 )
+                tavily_converted.append(tavily_doc)
             elif isinstance(doc, dict):
                 doc_copy = doc.copy()
                 doc_copy["source"] = "tavily"
-                tavily_converted.append(doc_copy)
+                tavily_doc = Document(
+                    page_content=doc_copy.get("content", ""),
+                    metadata=doc_copy.get("metadata", {}),
+                    score=float(doc_copy.get("score", 0)),
+                )
+                tavily_converted.append(tavily_doc)
 
         # Apply Tavily priority weight
         if tavily_converted:
             for doc in tavily_converted:
-                doc["score"] = doc.get("score", 0) * (1 - self.tavily_priority)
+                if hasattr(doc, "score"):
+                    doc.score = (doc.score or 0) * (1 - self.tavily_priority)
 
-        # Combine all documents
-        all_docs = local_docs + tavily_converted
+        # Combine all documents - convert local to Document objects first
+        all_docs = []
+
+        # Convert local docs to Document objects
+        for doc_data in local_docs:
+            if isinstance(doc_data, Document):
+                all_docs.append(doc_data)
+            else:
+                doc = Document(
+                    page_content=doc_data.get("content", ""),
+                    metadata=doc_data.get("metadata", {}),
+                    score=float(doc_data.get("score", 0.5)),
+                )
+                all_docs.append(doc)
+
+        # Add tavily docs
+        all_docs.extend(tavily_converted)
 
         # Rank by score
-        all_docs.sort(key=lambda x: x.get("score", 0), reverse=True)
+        all_docs.sort(key=lambda x: x.score or 0, reverse=True)
 
         return all_docs
 
@@ -742,9 +981,7 @@ class TavilySearchIntegration:
             query_refiner: Optional query refiner
         """
         self.tavily_search = tavily_search
-        self.query_refiner = query_refiner or QueryRefiner(
-            llm=type(self).__init__.__globals__.get("llm_mock", None)
-        )
+        self.query_refiner = query_refiner or QueryRefiner(llm=None)
         self.search_history: List[Dict[str, Any]] = []
 
     def search(
@@ -858,7 +1095,7 @@ class TavilySearchIntegration:
             "total_searches": len(self.search_history),
             "total_documents": total_docs,
             "avg_documents_per_search": total_docs / len(self.search_history),
-            "last_query": self.search_history[-1]["query"]
-            if self.search_history
-            else None,
+            "last_query": (
+                self.search_history[-1]["query"] if self.search_history else None
+            ),
         }
