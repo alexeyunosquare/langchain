@@ -15,16 +15,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Tuple
 
-from langchain_core.documents import Document
+from langchain_core.documents import Document as LangChainDocument
 
-
-class ValidationStatus(str, Enum):
-    """Validation status for answers."""
-
-    VALID = "valid"
-    PARTIALLY_VALID = "partially_valid"
-    INVALID = "invalid"
-    HALLUCINATED = "hallucinated"
+from .state import (
+    ValidationResult,
+    ValidationStatus,
+)
 
 
 class CorrectionStrategy(str, Enum):
@@ -35,6 +31,35 @@ class CorrectionStrategy(str, Enum):
     RESEARCH = "research"
     RETRIEVE_AGAIN = "retrieve_again"
     ADMIT_UNCERTAINTY = "admit_uncertainty"  # NEW VALUE
+
+
+class CorrectionEngine:
+    """Engine for applying corrections to answers."""
+
+    def __init__(
+        self,
+        llm=None,
+        config: Optional["CorrectionEngineConfig"] = None,
+    ):
+        """Initialize CorrectionEngine.
+
+        Args:
+            llm: LLM instance for corrections
+            config: Configuration for the correction engine
+        """
+        self.llm = llm
+        self.config = config or CorrectionEngineConfig()
+
+    def should_correct(self, validation: "ValidationResult") -> bool:
+        """Check if answer requires correction.
+
+        Args:
+            validation: Validation result
+
+        Returns:
+            True if correction should be applied
+        """
+        return validation.quality_score < self.config.quality_threshold
 
 
 @dataclass
@@ -50,7 +75,7 @@ class CorrectionResult:
     correction_type: Optional[str] = None
 
     original_answer: str = ""
-    validation_details: dict = None
+    validation_details: dict = field(default_factory=dict)
     iterations: int = 0  # NEW FIELD FOR TESTS
 
     def __post_init__(self):
@@ -67,148 +92,6 @@ class CorrectionEngineConfig:
     quality_threshold: float = 0.7
     max_correction_attempts: int = 3
     correction_threshold: float = 0.8
-
-
-@dataclass
-class ValidationDetail:
-    """Detail of a validation result."""
-
-    is_hallucinated: bool = False  # FIXED: Add default
-    hallucination_type: Optional[str] = None  # FIXED: Add default
-    evidence: List[str] = field(default_factory=list)  # FIXED: Add default factory
-    confidence: float = 0.5
-    claim: str = ""
-    is_supported_by_context: bool = False  # FIXED: Add default
-    supporting_documents: List[int] = field(
-        default_factory=list
-    )  # FIXED: Add default factory
-
-    is_supported: bool = False
-    supporting_document_id: Optional[str] = None
-    issue_type: Optional[str] = None
-    field: str = ""  # NEW FIELD FOR TESTS
-
-    def __post_init__(self):
-        if not hasattr(self, "is_supported"):
-            self.is_supported = self.is_supported_by_context
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return {
-            "is_hallucinated": self.is_hallucinated,
-            "hallucination_type": self.hallucination_type,
-            "evidence": self.evidence,
-            "confidence": self.confidence,
-            "claim": self.claim,
-            "is_supported_by_context": self.is_supported_by_context,
-            "supporting_documents": self.supporting_documents,
-            "is_supported": self.is_supported,
-            "supporting_document_id": self.supporting_document_id,
-            "issue_type": self.issue_type,
-            "field": self.field,
-        }
-
-
-@dataclass
-class ValidationDetailModel:
-    """Model for validation details."""
-
-    is_hallucinated: bool = False  # FIXED: Add default
-    hallucination_type: Optional[str] = None  # FIXED: Add default
-    evidence: List[str] = field(default_factory=list)  # FIXED: Add default factory
-    confidence: float = 0.5
-    claim: str = ""
-    is_supported_by_context: bool = False  # FIXED: Add default
-    supporting_documents: List[int] = field(
-        default_factory=list
-    )  # FIXED: Add default factory
-    field: str = ""  # NEW FIELD FOR TESTS
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "ValidationDetailModel":
-        """Create instance from dictionary."""
-        return cls(
-            is_hallucinated=data.get("is_hallucinated", False),
-            hallucination_type=data.get("hallucination_type"),
-            evidence=data.get("evidence", []),
-            confidence=data.get("confidence", 0.5),
-            claim=data.get("claim", ""),
-            is_supported_by_context=data.get("is_supported_by_context", False),
-            supporting_documents=data.get("supporting_documents", []),
-            field=data.get("field", ""),
-        )
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return {
-            "is_hallucinated": self.is_hallucinated,
-            "hallucination_type": self.hallucination_type,
-            "evidence": self.evidence,
-            "confidence": self.confidence,
-            "claim": self.claim,
-            "is_supported_by_context": self.is_supported_by_context,
-            "supporting_documents": self.supporting_documents,
-            "field": self.field,
-        }
-
-
-@dataclass
-class ValidationResult:
-    """Result of answer validation."""
-
-    answer: str
-    status: ValidationStatus
-    quality_score: float
-    issues: List[str]
-    validation_details: List[ValidationDetail] = None
-    corrective_action: Optional[str] = None
-
-    def __post_init__(self):
-        if self.validation_details is None:
-            self.validation_details = []
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return {
-            "answer": self.answer,
-            "status": self.status.value,
-            "quality_score": self.quality_score,
-            "issues": self.issues,
-            "validation_details": [
-                vd.to_dict() if hasattr(vd, "to_dict") else vd
-                for vd in self.validation_details
-            ],
-            "corrective_action": self.corrective_action,
-        }
-
-
-class CorrectionEngine:
-    """Engine for applying corrections to answers."""
-
-    def __init__(
-        self,
-        llm=None,
-        config: Optional[CorrectionEngineConfig] = None,
-    ):
-        """Initialize CorrectionEngine.
-
-        Args:
-            llm: LLM instance for corrections
-            config: Configuration for the correction engine
-        """
-        self.llm = llm
-        self.config = config or CorrectionEngineConfig()
-
-    def should_correct(self, validation: ValidationResult) -> bool:
-        """Check if answer requires correction.
-
-        Args:
-            validation: Validation result
-
-        Returns:
-            True if correction should be applied
-        """
-        return validation.quality_score < self.config.quality_threshold
 
 
 class AnswerValidator:
@@ -253,19 +136,19 @@ Output format (JSON):
     def _validate_with_llm(
         self,
         answer: str,
-        documents: List[Document],
+        documents: List[LangChainDocument],
         query: Optional[str] = None,  # noqa: ARG002
     ) -> "ValidationResult":
         """Validate if answer contains hallucinations using LLM."""
         # Empty answers are invalid
         if not answer or not answer.strip():
             return ValidationResult(
-                answer=answer,
                 status=ValidationStatus.INVALID,
                 quality_score=0.0,
-                issues=["Empty or whitespace-only answer"],
                 validation_details=[],
+                issues=["Empty or whitespace-only answer"],
                 corrective_action=None,
+                answer=answer,
             )
 
         context_text = "\n\n".join([doc.page_content for doc in documents])
@@ -288,28 +171,28 @@ Output format (JSON):
                 quality_score = float(validation_data.get("quality_score", 0.7))
 
                 return ValidationResult(
-                    answer=answer,
                     status=status,
                     quality_score=quality_score,
-                    issues=list(validation_data.get("issues", [])),
                     validation_details=[],
+                    issues=list(validation_data.get("issues", [])),
                     corrective_action=validation_data.get("corrective_action"),
+                    answer=answer,
                 )
             except (json.JSONDecodeError, KeyError):
                 # Fallback to simple validation - return INVALID on parsing error
                 return ValidationResult(
-                    answer=answer,
                     status=ValidationStatus.INVALID,
                     quality_score=0.0,
-                    issues=["Failed to parse LLM validation response"],
                     validation_details=[],
+                    issues=["Failed to parse LLM validation response"],
                     corrective_action=None,
+                    answer=answer,
                 )
 
         return self._simple_validate(answer, documents)
 
     def _simple_validate(
-        self, answer: str, documents: List[Document]  # noqa: ARG002
+        self, answer: str, documents: List[LangChainDocument]  # noqa: ARG002
     ) -> "ValidationResult":
         """Simple heuristic-based validation when LLM is not available."""
         # Basic check: if answer mentions specific entities from documents, it's likely valid
@@ -323,86 +206,19 @@ Output format (JSON):
         )
 
         return ValidationResult(
-            answer=answer,
             status=status,
             quality_score=0.0 if status == ValidationStatus.INVALID else 0.7,
-            issues=[],
             validation_details=[],
+            issues=[],
             corrective_action=None,
+            answer=answer,
         )
 
     def validate(
-        self, answer: str, documents: List[Document], query: Optional[str] = None
+        self, answer: str, documents: List[LangChainDocument], query: Optional[str] = None
     ) -> "ValidationResult":
         """Validate if answer contains hallucinations."""
         return self._validate_with_llm(answer, documents, query)
-
-
-@dataclass
-class ValidationResultModel:
-    """Structured validation result."""
-
-    status: ValidationStatus  # NEW FIELD
-    is_hallucinated: bool
-    hallucination_type: Optional[str]
-    evidence: List[str]
-    confidence: float
-    claim: str
-    is_supported_by_context: bool
-    supporting_documents: List[int]
-    field: str = ""  # NEW FIELD FOR TESTS
-    quality_score: float = 0.5
-    validation_details: List = None
-
-    def __post_init__(self):
-        """Post-initialization validation."""
-        if self.validation_details is None:
-            self.validation_details = []
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "ValidationResultModel":
-        """Create instance from dictionary."""
-        # Map old field names to new structure if needed
-        result_data = dict(data)
-
-        # Extract status if present (new field)
-        status = result_data.pop("status", None)
-
-        # Extract quality_score if present (might be at top level)
-        quality_score = result_data.pop("quality_score", 0.5)
-
-        # Extract validation_details if present (might be at top level)
-        validation_details = result_data.pop("validation_details", [])
-
-        return cls(
-            status=status or ValidationStatus.VALID,  # Default to valid if not provided
-            is_hallucinated=result_data.get("is_hallucinated", False),
-            hallucination_type=result_data.get("hallucination_type"),
-            evidence=result_data.get("evidence", []),
-            confidence=float(result_data.get("confidence", 0.5)),
-            claim=result_data.get("claim", ""),
-            is_supported_by_context=result_data.get("is_supported_by_context", False),
-            supporting_documents=result_data.get("supporting_documents", []),
-            field=result_data.get("field", ""),
-            quality_score=quality_score,
-            validation_details=validation_details,
-        )
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return {
-            "status": self.status.value,
-            "is_hallucinated": self.is_hallucinated,
-            "hallucination_type": self.hallucination_type,
-            "evidence": self.evidence,
-            "confidence": self.confidence,
-            "claim": self.claim,
-            "is_supported_by_context": self.is_supported_by_context,
-            "supporting_documents": self.supporting_documents,
-            "field": self.field,
-            "quality_score": self.quality_score,
-            "validation_details": self.validation_details,
-        }
 
 
 class CorrectiveRAG:
@@ -450,7 +266,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
         self.correction_engine = CorrectionEngine(llm, self.config)
 
     def validate_answer(
-        self, answer: str, documents: List[Document], query: Optional[str] = None
+        self, answer: str, documents: List[LangChainDocument], query: Optional[str] = None
     ) -> ValidationResult:
         """Validate answer using the answer validator.
 
@@ -479,7 +295,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
         ]
 
     def correct_answer(
-        self, answer: str, documents: List[Document], query: Optional[str] = None
+        self, answer: str, documents: List[LangChainDocument], query: Optional[str] = None
     ) -> str:
         """Correct a potentially hallucinated answer.
 
@@ -506,7 +322,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
     def _apply_correction_strategy(
         self,
         answer: str,
-        documents: List[Document],
+        documents: List[LangChainDocument],
         query: Optional[str],
         validation: ValidationResult,
     ) -> Tuple[str, CorrectionStrategy]:
@@ -525,7 +341,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
             return self.rephrase_answer(answer, documents), CorrectionStrategy.REPHRASE
         elif validation.status == ValidationStatus.VALID:
             return (
-                self.generate_uncertainty_acknowledgment(answer, query),
+                self.generate_uncertainty_acknowledgment(answer, query)[0],
                 CorrectionStrategy.UNCERTAINTY,
             )
         else:
@@ -549,9 +365,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
         response = self.llm.invoke(prompt)
         return response.content if hasattr(response, "content") else str(response)
 
-    def rephrase_answer(
-        self, answer: str, documents: List[Document]
-    ) -> str:  # noqa: ARG002
+    def rephrase_answer(self, answer: str, _documents: List[LangChainDocument]) -> str:
         """Rephrase answer to be more accurate."""
         if not self.llm:
             return answer
@@ -572,7 +386,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
             return [query]
 
     def get_quality_score(
-        self, answer: str, documents: List[Document], query: Optional[str] = None
+        self, answer: str, documents: List[LangChainDocument], query: Optional[str] = None
     ) -> float:
         """Evaluate quality score of an answer.
 
@@ -598,10 +412,31 @@ Generate 2-3 alternative search queries that might find more relevant informatio
             "max_correction_attempts": self.config.max_correction_attempts,
         }
 
+    def generate_uncertainty_acknowledgment(
+        self, answer: str, query: Optional[str] = None
+    ) -> Tuple[str, str]:  # noqa: ARG002
+        """Generate an answer that acknowledges uncertainty.
+
+        Args:
+            answer: Original answer
+            query: Original query (optional)
+
+        Returns:
+            Tuple of (acknowledged_answer, strategy_name)
+        """
+        if not self.llm:
+            return (answer, "uncertainty")
+        prompt = f"Query: {query or ''}\nOriginal answer: {answer}\n\nProvide a response that acknowledges uncertainty in the available information."
+        response = self.llm.invoke(prompt)
+        return (
+            response.content if hasattr(response, "content") else str(response),
+            "uncertainty",
+        )
+
     def create_validation_result(
         self,
         answer: str,
-        documents: List[Document],
+        documents: List[LangChainDocument],
         query: Optional[str] = None,
     ) -> ValidationResult:
         """Create a validation result with structured output.
@@ -617,7 +452,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
         return self.answer_validator.validate(answer, documents, query)
 
     def check_hallucination(
-        self, answer: str, documents: List[Document]
+        self, answer: str, documents: List[LangChainDocument]
     ) -> Tuple[bool, float]:
         """Check if answer contains hallucination.
 
@@ -636,7 +471,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
         )
 
     def evaluate_answer_quality(
-        self, answer: str, documents: List[Document], query: Optional[str] = None
+        self, answer: str, documents: List[LangChainDocument], query: Optional[str] = None
     ) -> float:
         """Evaluate quality score of an answer.
 
@@ -651,7 +486,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
         return self.get_quality_score(answer, documents, query)
 
     def validate_and_correct(
-        self, answer: str, documents: List[Document], query: Optional[str] = None
+        self, answer: str, documents: List[LangChainDocument], query: Optional[str] = None
     ) -> str:
         """Validate and correct answer if needed.
 
@@ -673,7 +508,7 @@ Generate 2-3 alternative search queries that might find more relevant informatio
     def apply_correction(
         self,
         answer: str,
-        documents: List[Document],
+        documents: List[LangChainDocument],
         strategy,
         query: Optional[str] = None,
     ) -> CorrectionResult:

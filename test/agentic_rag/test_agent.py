@@ -51,6 +51,8 @@ class TestAgenticRAGAgent:
             confidence=0.85,
             reason="Documents are relevant to the query",
         )
+        mock.should_search_again.return_value = False
+        mock.threshold = 0.7
         return mock
 
     def test_agent_initialization(self, mock_llm, mock_retriever, mock_evaluator):

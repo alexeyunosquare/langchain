@@ -13,11 +13,15 @@ from src.agentic_rag.corrective import (
     CorrectionResult,
     CorrectionStrategy,
     CorrectiveRAG,
-    ValidationDetail,
-    ValidationResult,
     ValidationStatus,
 )
-from src.agentic_rag.state import Document, Message, MessageRole
+from src.agentic_rag.state import (
+    Document,
+    Message,
+    MessageRole,
+    ValidationDetail,
+    ValidationResult,
+)
 
 
 class TestCorrectiveRAG:
@@ -314,20 +318,22 @@ class TestCorrectionEngine:
 
         # High quality validation
         validation = ValidationResult(
-            answer="Good answer",
             status=ValidationStatus.VALID,
             quality_score=0.9,
+            validation_details=[],
             issues=[],
+            answer="Good answer",
         )
 
         assert engine.should_correct(validation) is False
 
         # Low quality validation
         validation_low = ValidationResult(
-            answer="Bad answer",
             status=ValidationStatus.INVALID,
             quality_score=0.5,
+            validation_details=[],
             issues=["Low quality"],
+            answer="Bad answer",
         )
 
         assert engine.should_correct(validation_low) is True
@@ -349,19 +355,16 @@ class TestCorrectionEngine:
         assert result.iterations == 1
 
     def test_validation_detail_structure(self):
-        """Test ValidationDetail dataclass structure."""
+        """Test ValidationDetail Pydantic model structure."""
         detail = ValidationDetail(
-            claim="Test claim",
-            is_supported=True,
-            supporting_document_id="doc1",
-            confidence=0.9,
-            issue_type=None,
+            field="claim_field",
+            is_valid=True,
+            message="Test validation message",
         )
 
-        assert detail.claim == "Test claim"
-        assert detail.is_supported is True
-        assert detail.supporting_document_id == "doc1"
-        assert detail.confidence == 0.9
+        assert detail.field == "claim_field"
+        assert detail.is_valid is True
+        assert detail.message == "Test validation message"
 
 
 class TestValidationStatus:

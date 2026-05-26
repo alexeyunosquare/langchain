@@ -10,7 +10,6 @@ Phase 5: LangGraph Orchestration
 - State persistence and recovery
 """
 
-from datetime import datetime
 from typing import Any, Optional
 
 from langchain_core.language_models.base import BaseLanguageModel
@@ -19,33 +18,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .config import AgenticRAGConfig
 from .evaluator import RelevanceEvaluator
-from .state import Document, GraphState, Message, MessageRole
-
-
-class NodeResult(dict):
-    """
-    Dictionary subclass that also supports attribute access.
-
-    This allows LangGraph nodes to return dicts while supporting both
-    dict-style and attribute-style access for test compatibility.
-    """
-
-    def __getattr__(self, key: str):
-        """Support attribute access (e.g., result.validation_passed)."""
-        try:
-            return self[key]
-        except KeyError:
-            raise AttributeError(
-                f"'{type(self).__name__}' object has no attribute '{key}'"
-            ) from None
-
-    def __setattr__(self, key: str, value):
-        """Support attribute assignment (e.g., result.validation_passed = True)."""
-        self[key] = value
-
-    def __delattr__(self, key: str):
-        """Support attribute deletion."""
-        del self[key]
+from .state import Document, Message, MessageRole
 
 
 class LangGraphNode:
@@ -58,7 +31,7 @@ class LangGraphNode:
     """
 
     @staticmethod
-    def retrieve_documents(state, retriever: object) -> dict:
+    def retrieve_documents(state: dict, retriever: BaseRetriever) -> dict:
         """
         Retrieve documents based on the current query.
 
@@ -66,21 +39,15 @@ class LangGraphNode:
         with retrieved documents and metadata.
 
         Args:
-            state: Current LangGraph state (TypedDict or AgentState)
+            state: Current LangGraph state (dict)
             retriever: Document retriever instance
 
         Returns:
             Dict of updates to apply to state
         """
-        # Handle both TypedDict and Pydantic model
-        if hasattr(state, "get"):
-            query = state.get("query", "")
-            search_count = state.get("search_count", 0)
-            iteration = state.get("iteration", 0)
-        else:
-            query = getattr(state, "query", "")
-            search_count = getattr(state, "search_count", 0)
-            iteration = getattr(state, "iteration", 0)
+        query = state.get("query", "")
+        search_count = state.get("search_count", 0)
+        iteration = state.get("iteration", 0)
 
         # Retrieve documents using retriever
         try:
@@ -114,7 +81,7 @@ class LangGraphNode:
             }
 
     @staticmethod
-    def evaluate_relevance(state, evaluator: RelevanceEvaluator) -> dict:
+    def evaluate_relevance(state: dict, evaluator: RelevanceEvaluator) -> dict:
         """
         Evaluate relevance of retrieved documents.
 
@@ -122,21 +89,15 @@ class LangGraphNode:
         to the query and determines if another search is needed.
 
         Args:
-            state: Current LangGraph state (TypedDict or AgentState)
+            state: Current LangGraph state (dict)
             evaluator: Relevance evaluator instance
 
         Returns:
             Dict of updates to apply to state
         """
-        # Handle both TypedDict and Pydantic model
-        if hasattr(state, "get"):
-            documents = state.get("documents")
-            error = state.get("error")
-            query = state.get("query", "")
-        else:
-            documents = getattr(state, "documents", [])
-            error = getattr(state, "error", None)
-            query = getattr(state, "query", "")
+        documents = state.get("documents")
+        error = state.get("error")
+        query = state.get("query", "")
 
         if not documents:
             return {
@@ -151,11 +112,11 @@ class LangGraphNode:
         return {
             "is_relevant": evaluation.is_relevant,
             "should_search_again": evaluator.should_search_again(evaluation),
-            "evaluation_result": evaluation.to_dict(),
+            "evaluation_result": evaluation.model_dump(),
         }
 
     @staticmethod
-    def refine_query(state) -> dict:
+    def refine_query(state: dict) -> dict:
         """
         Refine the search query based on previous results.
 
@@ -163,18 +124,13 @@ class LangGraphNode:
         based on the evaluation of previous documents.
 
         Args:
-            state: Current LangGraph state (TypedDict or AgentState)
+            state: Current LangGraph state (dict)
 
         Returns:
             Dict with updated query
         """
-        # Handle both TypedDict and Pydantic model
-        if hasattr(state, "get"):
-            query = state.get("query", "")
-            evaluation = state.get("evaluation_result")
-        else:
-            query = getattr(state, "query", "")
-            evaluation = getattr(state, "evaluation_result", None)
+        query = state.get("query", "")
+        evaluation = state.get("evaluation_result")
 
         if not evaluation or not evaluation.get("reason"):
             # No reason provided, return original query
@@ -217,7 +173,7 @@ class LangGraphNode:
         return {"query": query}
 
     @staticmethod
-    def generate_answer(state, llm: object, corrective: object) -> NodeResult:
+    def generate_answer(state: dict, llm: BaseLanguageModel, corrective: Any) -> dict:
         """
         Generate answer from retrieved documents.
 
@@ -225,28 +181,17 @@ class LangGraphNode:
         documents as context.
 
         Args:
-            state: Current LangGraph state (TypedDict or AgentState)
+            state: Current LangGraph state (dict)
             llm: Language model instance
             corrective: CorrectiveRAG instance for validation
 
         Returns:
-            NodeResult with the generated answer and messages (supports both dict and attr access)
+            Dict with the generated answer and messages
         """
-        # Handle both TypedDict and Pydantic model
-        if hasattr(state, "get"):
-            documents = state.get("documents", [])
-            context = state.get("context")
-            query = state.get("query", "")
-            messages = state.get("messages", [])
-        else:
-            # For Pydantic models, use dict() to get all fields as a dictionary
-            state_dict = state.dict() if hasattr(state, "dict") else {}
-            documents = state_dict.get(
-                "documents", state_dict.get("retrieved_documents", [])
-            )
-            context = state_dict.get("context")
-            query = state_dict.get("query", "")
-            messages = state_dict.get("messages", [])
+        documents = state.get("documents", [])
+        context = state.get("context")
+        query = state.get("query", "")
+        messages = state.get("messages", [])
 
         # Build context from documents if not provided
         if not context:
@@ -277,7 +222,6 @@ Answer:
         answer = answer or "Unable to generate answer"
 
         # Build messages list with the new assistant message
-
         assistant_message = Message(
             role=MessageRole.ASSISTANT,
             content=answer,
@@ -288,13 +232,11 @@ Answer:
         else:
             updated_messages = list(messages) + [assistant_message]
 
-        # Return NodeResult (supports both dict and attribute access)
-        updates = NodeResult(
-            {
-                "answer": answer,
-                "messages": updated_messages,
-            }
-        )
+        # Return dict with answer and messages
+        updates: dict = {
+            "answer": answer,
+            "messages": updated_messages,
+        }
 
         # Validate and correct if available
         if corrective and documents:
@@ -340,43 +282,28 @@ Answer:
         return "generate"
 
     @staticmethod
-    def validate_and_correct(state) -> NodeResult:
+    def validate_and_correct(state: dict) -> dict:
         """
         Final validation node for answer quality.
 
         This node performs final validation of the answer before returning.
 
         Args:
-            state: Current LangGraph state (TypedDict or AgentState)
+            state: Current LangGraph state (dict)
 
         Returns:
-            NodeResult with validation status (supports both dict and attr access)
+            Dict with validation status
         """
-        # Handle both TypedDict and Pydantic model
-        if hasattr(state, "get"):
-            answer = state.get("answer", "")
-            # Support both 'answer' and 'generated_answer' field names
-            if not answer:
-                answer = state.get("generated_answer", "")
-        else:
-            answer = getattr(state, "answer", "") or getattr(
-                state, "generated_answer", ""
-            )
-
-        # Add None check: if state is None
-        if answer is None:
-            answer = ""
+        answer = state.get("answer", "")
 
         # Ensure answer is a non-empty string
         answer_str = answer.strip() if isinstance(answer, str) else ""
 
-        result = NodeResult(
-            {
-                "validation_passed": True,
-                "correction_triggered": False,
-                "hallucination_score": 0.5,  # Default score
-            }
-        )
+        result: dict = {
+            "validation_passed": True,
+            "correction_triggered": False,
+            "hallucination_score": 0.5,  # Default score
+        }
 
         if not answer_str:
             result["validation_passed"] = False
@@ -393,16 +320,12 @@ Answer:
         After subsequent retrievals (search_count > 1), route to refine to improve the query.
 
         Args:
-            state: Current LangGraph state
+            state: Current LangGraph state (dict)
 
         Returns:
             'evaluate' if first retrieval, 'refine' otherwise
         """
-        # Support both TypedDict and Pydantic model
-        if hasattr(state, "get"):
-            search_count = state.get("search_count", 0)
-        else:
-            search_count = getattr(state, "search_count", 0)
+        search_count = state.get("search_count", 0)
 
         # After first retrieval (search_count == 1), go to evaluate
         # After subsequent retrievals (search_count > 1), go to refine
@@ -416,7 +339,7 @@ def build_agentic_rag_graph(
     llm: BaseLanguageModel,
     retriever: BaseRetriever,
     config: Optional[AgenticRAGConfig] = None,
-) -> StateGraph:
+) -> Any:  # type: ignore[return-value]
     """
     Build the LangGraph state machine for Agentic RAG.
 
@@ -437,30 +360,30 @@ def build_agentic_rag_graph(
     config = config or AgenticRAGConfig()
     corrective = CorrectiveRAG(llm=llm)
 
-    # Create the workflow with GraphState (TypedDict)
-    workflow = StateGraph(GraphState)
+    # Create the workflow with dict state (LangGraph native)
+    workflow = StateGraph(dict)  # type: ignore[arg-type]
 
     # Add nodes with proper function signatures
     from functools import partial
 
     workflow.add_node(
         "retrieve",
-        partial(LangGraphNode.retrieve_documents, retriever=retriever),
+        partial(LangGraphNode.retrieve_documents, retriever=retriever),  # type: ignore[arg-type]
     )
     workflow.add_node(
         "evaluate",
-        partial(LangGraphNode.evaluate_relevance, evaluator=evaluator),
+        partial(LangGraphNode.evaluate_relevance, evaluator=evaluator),  # type: ignore[arg-type]
     )
-    workflow.add_node("refine", LangGraphNode.refine_query)
+    workflow.add_node("refine", LangGraphNode.refine_query)  # type: ignore[arg-type]
     workflow.add_node(
         "generate",
         partial(
             LangGraphNode.generate_answer,
             llm=llm,
             corrective=corrective,
-        ),
+        ),  # type: ignore[arg-type]
     )
-    workflow.add_node("validate", LangGraphNode.validate_and_correct)
+    workflow.add_node("validate", LangGraphNode.validate_and_correct)  # type: ignore[arg-type]
 
     # Add edges - START -> retrieve
     workflow.add_edge(START, "retrieve")
@@ -573,7 +496,7 @@ class LangGraphAgenticRAG:
             config=self.config,
         )
 
-    def run(self, query: str, max_search_count: int = None):
+    def run(self, query: str, max_search_count: Optional[int] = None):
         """
         Execute the agentic RAG workflow.
 
@@ -584,7 +507,7 @@ class LangGraphAgenticRAG:
         Returns:
             Final state after workflow completion (as dict with get() and attributes)
         """
-        from .state import AgentState
+        from .state import AgenticRAGState
 
         max_search_count = max_search_count or self.config.max_search_iterations
 
@@ -594,9 +517,10 @@ class LangGraphAgenticRAG:
             "messages": [],
             "documents": [],
             "context": "",
-            "answer": "",
+            "answer": None,
             "is_relevant": None,
             "should_search_again": None,
+            "should_rerun": False,
             "validation_passed": None,
             "correction_triggered": None,
             "hallucination_score": None,
@@ -605,34 +529,29 @@ class LangGraphAgenticRAG:
             "search_count": 0,
             "iteration": 0,
             "error": None,
+            "original_query": query,
         }
 
         # Execute graph
         result = self.graph.invoke(initial_state)
 
-        # Convert dict result to AgentState for consistent access
+        # Convert dict result to AgenticRAGState for consistent access
         if isinstance(result, dict):
-            return AgentState(
+            return AgenticRAGState(
                 query=result.get("query", ""),
-                original_query=result.get("search_query", ""),
-                retrieved_documents=result.get("documents", []),
+                original_query=result.get("original_query", result.get("search_query", "")),
+                documents=result.get("documents", []),
                 search_history=[],
                 relevance_scores=[],
-                generated_answer=result.get("answer", ""),
+                answer=result.get("answer"),
                 answer_quality_score=result.get("hallucination_score"),
                 validation_result=None,
-                should_rerun=result.get("should_search_again", False),
+                should_rerun=result.get("should_search_again", result.get("should_rerun", False)),
                 rerun_reason=None,
-                session_id=f"session_{datetime.now().isoformat()}",
-                timestamps={},
-                # GraphState-specific fields
                 is_relevant=result.get("is_relevant"),
-                should_search_again=result.get("should_search_again"),
                 validation_passed=result.get("validation_passed"),
                 correction_triggered=result.get("correction_triggered"),
                 hallucination_score=result.get("hallucination_score"),
-                search_query=result.get("search_query", ""),
-                search_results=result.get("search_results", []),
                 search_count=result.get("search_count", 0),
                 iteration=result.get("iteration", 0),
                 error=result.get("error"),
@@ -648,18 +567,19 @@ class LangGraphAgenticRAG:
             query: User's question
 
         Yields:
-            State updates at each node (as AgentState for consistent access)
+            State updates at each node (as AgenticRAGState for consistent access)
         """
-        from .state import AgentState
+        from .state import AgenticRAGState
 
         initial_state = {
             "query": query,
             "messages": [],
             "documents": [],
             "context": "",
-            "answer": "",
+            "answer": None,
             "is_relevant": None,
             "should_search_again": None,
+            "should_rerun": False,
             "validation_passed": None,
             "correction_triggered": None,
             "hallucination_score": None,
@@ -668,31 +588,27 @@ class LangGraphAgenticRAG:
             "search_count": 0,
             "iteration": 0,
             "error": None,
+            "original_query": query,
         }
 
         for event in self.graph.stream(initial_state, stream_mode="values"):
-            # Convert dict to AgentState for consistent access
+            # Convert dict to AgenticRAGState for consistent access
             if isinstance(event, dict):
-                yield AgentState(
+                yield AgenticRAGState(
                     query=event.get("query", ""),
-                    original_query=event.get("search_query", ""),
-                    retrieved_documents=event.get("documents", []),
+                    original_query=event.get("original_query", event.get("search_query", "")),
+                    documents=event.get("documents", []),
                     search_history=[],
                     relevance_scores=[],
-                    generated_answer=event.get("answer", ""),
+                    answer=event.get("answer"),
                     answer_quality_score=event.get("hallucination_score"),
                     validation_result=None,
-                    should_rerun=event.get("should_search_again", False),
+                    should_rerun=event.get("should_search_again", event.get("should_rerun", False)),
                     rerun_reason=None,
-                    session_id=f"session_{datetime.now().isoformat()}",
-                    timestamps={},
                     is_relevant=event.get("is_relevant"),
-                    should_search_again=event.get("should_search_again"),
                     validation_passed=event.get("validation_passed"),
                     correction_triggered=event.get("correction_triggered"),
                     hallucination_score=event.get("hallucination_score"),
-                    search_query=event.get("search_query", ""),
-                    search_results=event.get("search_results", []),
                     search_count=event.get("search_count", 0),
                     iteration=event.get("iteration", 0),
                     error=event.get("error"),

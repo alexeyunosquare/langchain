@@ -7,17 +7,14 @@ to decide whether to search again or proceed with answer generation.
 """
 
 import json
-from dataclasses import dataclass, field
 from typing import List, Optional
 
 from langchain_core.documents import Document as LangChainDocument
 from langchain_core.language_models import BaseLanguageModel
+from pydantic import BaseModel, Field
 
-from .state import Document
 
-
-@dataclass
-class EvaluationResult:
+class EvaluationResult(BaseModel):
     """
     Result of document relevance evaluation.
 
@@ -33,13 +30,15 @@ class EvaluationResult:
     """
 
     is_relevant: bool
-    confidence: float = 0.0
+    confidence: float = Field(default=0.0)
     reason: Optional[str] = None
-    document_ids: List[str] = field(default_factory=list)
-    quality_score: float = 0.5
-    should_rerun_search: bool = False
+    document_ids: List[str] = Field(default_factory=list)
+    quality_score: float = Field(default=0.5)
+    should_rerun_search: bool = Field(default=False)
     rerun_reason: Optional[str] = None
-    documents_evaluated: List[Document] = field(default_factory=list)
+    documents_evaluated: List[LangChainDocument] = Field(default_factory=list)
+
+    model_config = {"arbitrary_types_allowed": True}
 
     def __str__(self) -> str:
         return (
@@ -131,18 +130,8 @@ Respond ONLY with valid JSON, no other text.
                 reason="No documents provided",
             )
 
-        # Convert LangChainDocument to internal Document format for processing
-        internal_docs = [
-            Document(
-                page_content=doc.page_content,
-                metadata=doc.metadata if hasattr(doc, "metadata") else {},
-                score=getattr(doc, "score", None),
-            )
-            for doc in documents
-        ]
-
         # Format documents for evaluation
-        doc_text = "\n\n".join([doc.page_content for doc in internal_docs])
+        doc_text = "\n\n".join([doc.page_content for doc in documents])
 
         # Create evaluation prompt
         prompt = self.EVALUATION_PROMPT.format(
@@ -160,13 +149,13 @@ Respond ONLY with valid JSON, no other text.
             # Parse JSON response
             result = self._parse_evaluation_response(content)
 
-            # Add document IDs to result - extract from original LangChain documents
+            # Add document IDs to result - extract from documents
             result.document_ids = [
                 doc.metadata.get("id", str(i)) for i, doc in enumerate(documents)
             ]
 
-            # Also track internal Document objects evaluated
-            result.documents_evaluated = internal_docs.copy()
+            # Track Document objects evaluated
+            result.documents_evaluated = documents.copy()
 
             # Set should_rerun_search based on is_relevant
             result.should_rerun_search = not result.is_relevant

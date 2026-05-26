@@ -11,7 +11,13 @@ import pytest
 src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-from src.agentic_rag.state import AgentState, Document, Message, MessageRole
+from src.agentic_rag.state import (
+    AgenticRAGState,
+    AgentState,
+    Document,
+    Message,
+    MessageRole,
+)
 
 # Force reimport
 if "agentic_rag" in sys.modules:
@@ -25,7 +31,7 @@ class TestAgentState:
 
     def test_state_initialization(self):
         """Test that agent state initializes with correct default values."""
-        state = AgentState()
+        state = AgentState(query="")
 
         assert state.query == ""
         assert state.documents == []
@@ -40,37 +46,37 @@ class TestAgentState:
 
     def test_state_serialization_deserialization(self):
         """Test state can be serialized and deserialized."""
-        original_state = AgentState(
+        original_state = AgenticRAGState(
             query="Test query",
             search_count=1,
         )
 
-        # Test dict conversion
-        state_dict = original_state.to_dict()
+        # Test dict conversion using model_dump
+        state_dict = original_state.model_dump()
 
         assert "query" in state_dict
         assert "search_count" in state_dict
 
-        # Test reconstruction
-        restored_state = AgentState.from_dict(state_dict)
+        # Test reconstruction using model_validate
+        restored_state = AgenticRAGState.model_validate(state_dict)
 
         assert restored_state.query == original_state.query
         assert restored_state.search_count == original_state.search_count
 
     def test_state_messages_append(self):
         """Test that add_message method works."""
-        state = AgentState(query="Test")
+        state = AgenticRAGState(query="Test")
 
         # Test add_message method exists and doesn't raise error
         state.add_message(MessageRole.USER, "Question")
         state.add_message(MessageRole.ASSISTANT, "Answer")
 
-        # Messages are not tracked in AgentState, but method should exist
-        assert hasattr(state, "add_message")
+        # Messages are tracked in AgenticRAGState
+        assert len(state.messages) == 2
 
     def test_state_empty_documents(self):
         """Test state with empty document list."""
-        state = AgentState(query="Test")
+        state = AgenticRAGState(query="Test")
 
         assert state.documents == []
         assert state.context == ""
@@ -88,14 +94,14 @@ class TestMessage:
 
     def test_message_validation_invalid_role(self):
         """Test message rejects invalid role values."""
-        with pytest.raises(ValueError, match="role must be one of"):
+        with pytest.raises(Exception):  # noqa: B017 Pydantic raises ValidationError
             Message(role="invalid", content="Test")
 
     def test_message_to_dict(self):
         """Test message serialization to dict."""
         msg = Message(role=MessageRole.ASSISTANT, content="Test content")
 
-        msg_dict = msg.to_dict()
+        msg_dict = msg.model_dump()
 
         assert msg_dict["role"] == "assistant"
         assert msg_dict["content"] == "Test content"
@@ -105,7 +111,7 @@ class TestMessage:
         """Test message deserialization from dict."""
         msg_dict = {"role": "user", "content": "Hello"}
 
-        msg = Message.from_dict(msg_dict)
+        msg = Message.model_validate(msg_dict)
 
         assert msg.role == MessageRole.USER
         assert msg.content == "Hello"
@@ -134,7 +140,7 @@ class TestDocument:
         """Test document serialization to dict."""
         doc = Document(page_content="Content", metadata={"source": "doc.txt"})
 
-        doc_dict = doc.to_dict()
+        doc_dict = doc.model_dump()
 
         assert doc_dict["page_content"] == "Content"
         assert doc_dict["metadata"]["source"] == "doc.txt"
@@ -146,7 +152,7 @@ class TestDocument:
             "metadata": {"source": "test.pdf", "page": 5},
         }
 
-        doc = Document.from_dict(doc_dict)
+        doc = Document.model_validate(doc_dict)
 
         assert doc.page_content == "Page content"
         assert doc.metadata["source"] == "test.pdf"

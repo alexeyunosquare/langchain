@@ -37,14 +37,14 @@ from .search import (
     TavilySearch,
     TavilySearchIntegration,
 )
-from .state import AgentState, Document, GraphState, Message
+from .state import AgenticRAGState, AgentState, Document, Message
 
 __all__ = [
     # Config
     "AgenticRAGConfig",
     # State
+    "AgenticRAGState",
     "AgentState",
-    "GraphState",
     "Message",
     "Document",
     # Evaluator
@@ -61,9 +61,6 @@ __all__ = [
     # Corrective (Phase 4)
     "CorrectiveRAG",
     "AnswerValidator",
-    "ValidationResult",
-    "ValidationStatus",
-    "ValidationDetail",
     "CorrectionEngine",
     "CorrectionResult",
     "CorrectionStrategy",

@@ -192,6 +192,7 @@ class MetricsCalculator:
         self,
         predicted: str,
         ground_truth: str,
+        query: str = "",
     ) -> AnswerMetrics:
         """Calculate answer quality metrics."""
         pred_normalized = self._normalize_text(predicted)
@@ -258,6 +259,7 @@ class MetricsCalculator:
         self,
         answer: str,
         documents: List[Union[Document, LangChainDocument]],
+        query: Optional[str] = None,
     ) -> HallucinationMetrics:
         """Calculate hallucination detection metrics."""
         if not documents:
@@ -318,7 +320,7 @@ class MetricsCalculator:
         answer_metrics = self.calculate_answer_metrics(answer, ground_truth, query)
         retrieval_metrics = self.calculate_retrieval_metrics(retrieved_docs, gold_docs)
         hallucination_metrics = self.calculate_hallucination_metrics(
-            answer, retrieved_docs
+            answer, retrieved_docs, query
         )
 
         return {
@@ -404,8 +406,8 @@ class MetricsCalculator:
 
     def _calculate_ndcg(
         self,
-        retrieved: List[Document],
-        relevant: List[Document],
+        retrieved: List[Union[Document, LangChainDocument]],
+        relevant: List[Union[Document, LangChainDocument]],
         k: int,
     ) -> float:
         """Calculate NDCG@k."""

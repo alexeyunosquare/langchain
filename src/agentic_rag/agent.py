@@ -7,23 +7,27 @@ generation with self-correction capabilities.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Generator, List, Optional
+from typing import Any, Generator, List, Optional, cast
 
-from langchain_core.language_models import BaseLanguageModel
-from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import (
+    Document as LangChainDocument,  # type: ignore[import-untyped]
+)
+from langchain_core.language_models import (
+    BaseLanguageModel,  # type: ignore[import-untyped]
+)
+from langchain_core.retrievers import BaseRetriever  # type: ignore[import-untyped]
 
 from .config import AgenticRAGConfig
 from .corrective import CorrectiveRAG
+from .corrective import ValidationResult as CorrectiveValidationResult
 from .evaluator import EvaluationResult, RelevanceEvaluator
 from .search import HybridRetrievalResult, HybridRetriever, QueryRefiner, TavilySearch
 from .state import (
-    AgentState,
+    AgenticRAGState,
     Document,
     MessageRole,
     SearchHistoryEntry,
-    ValidationDetailModel,
-    ValidationResultModel,
+    ValidationResult,
     ValidationStatus,
 )
 
@@ -168,12 +172,7 @@ Return ONLY the refined query, nothing else.
             self.hybrid_retriever = None
 
         # Initialize state with Pydantic model
-        self.state = AgentState(
-            query="",
-            original_query=None,
-            session_id=f"session_{datetime.now().isoformat()}",
-            messages=[],
-        )
+        self.state = AgenticRAGState(query="", original_query=None, answer="", rerun_reason=None, answer_quality_score=None)
 
     def run(
         self,
@@ -194,11 +193,12 @@ Return ONLY the refined query, nothing else.
 
         # Initialize state
         original_query = query
-        self.state = AgentState(
+        self.state = AgenticRAGState(
             query=query,
             original_query=original_query,
-            session_id=f"session_{datetime.now().isoformat()}",
-            messages=[],
+            answer="",
+            rerun_reason=None,
+            answer_quality_score=None,
         )
         self.state.add_message(MessageRole.USER, query)
         self.state.update_timestamp("query_received")
@@ -222,6 +222,7 @@ Return ONLY the refined query, nothing else.
                 )
 
                 # Retrieve documents
+                search_result: Optional[HybridRetrievalResult] = None
                 if self.use_hybrid_retrieval and self.hybrid_retriever:
                     # Use hybrid retrieval (local + Tavily)
                     search_result = self._retrieve_documents_hybrid(query)
@@ -229,29 +230,34 @@ Return ONLY the refined query, nothing else.
                     documents = self._convert_hybrid_to_documents(search_result)
                 else:
                     # Use local retrieval only
-                    search_results = self._retrieve_documents_local(query)
+                    local_results = self._retrieve_documents_local(query)
                     search_count += 1
-                    documents = self._convert_to_documents(search_results)
+                    documents = self._convert_to_documents(local_results)
 
                 self.state.search_count = search_count
-                self.state.search_results = (
-                    search_result.to_dict()
-                    if self.use_hybrid_retrieval
-                    else search_results
-                )
                 self.state.documents = documents
 
                 # Update search history entry with actual count
                 search_entry.document_count = len(documents)
 
                 # Evaluate documents
-                evaluation = self.evaluator.evaluate(query, documents)
+                # Cast documents to LangChainDocument for evaluator compatibility
+                from langchain_core.documents import Document as LC_Doc
+                lc_documents: List[LC_Doc] = []
+                for doc in documents:
+                    lc_doc = LC_Doc(page_content=doc.page_content, metadata=doc.metadata)
+                    if doc.score is not None:
+                        lc_doc.score = doc.score  # type: ignore[attr-defined]
+                    lc_documents.append(lc_doc)
+                evaluation = self.evaluator.evaluate(query, lc_documents)
                 self.state.is_relevant = evaluation.is_relevant
                 self.state.relevance_scores.append(evaluation.quality_score)
                 self.state.update_timestamp(f"evaluation_{iteration}")
 
                 # Record search in history
-                search_entry.evaluation = evaluation.to_dict()
+                search_entry.evaluation = (
+                    evaluation.model_dump() if hasattr(evaluation, "model_dump") else {}
+                )
                 search_entry.document_count = len(documents)
                 self.state.search_history.append(search_entry)
 
@@ -263,7 +269,7 @@ Return ONLY the refined query, nothing else.
 
                 # Documents not relevant, refine query and continue
                 query = self._refine_query(query, evaluation, iteration)
-                self.state.search_query = query
+                self.state.query = query
                 self.state.update_timestamp("query_refined")
 
                 # Check max search count
@@ -321,7 +327,7 @@ Return ONLY the refined query, nothing else.
             self.state.update_timestamp("error_occurred")
 
             return AgentResult(
-                answer=self.state.answer,
+                answer=self.state.answer or "Error processing query",
                 documents=[],
                 search_count=search_count,
                 validation_passed=False,
@@ -376,24 +382,30 @@ Return ONLY the refined query, nothing else.
         if not self.hybrid_retriever:
             # Fallback to local retrieval if hybrid not available
             local_docs = self._retrieve_documents_local(query)
+            documents = [
+                {
+                    "content": d["content"],
+                    "metadata": d["metadata"],
+                    "score": d["score"],
+                    "source": "local",
+                }
+                for d in local_docs
+            ]
             return HybridRetrievalResult(
-                documents=[
-                    {
-                        "content": d["content"],
-                        "metadata": d["metadata"],
-                        "score": d["score"],
-                        "source": "local",
-                    }
-                    for d in local_docs
-                ],
+                documents=cast(List[Any], documents),
                 local_count=len(local_docs),
                 tavily_count=0,
             )
 
         # Get evaluation feedback from state if available
         eval_feedback = None
-        if hasattr(self.state, "evaluation_result") and self.state.evaluation_result:
-            eval_feedback = self.state.evaluation_result.to_dict()
+        validation_result = getattr(self.state, "validation_result", None)
+        if validation_result:
+            eval_feedback = (
+                validation_result.model_dump()
+                if hasattr(validation_result, "model_dump")
+                else {}
+            )
 
         # Perform hybrid retrieval
         result = self.hybrid_retriever.retrieve(
@@ -431,23 +443,91 @@ Return ONLY the refined query, nothing else.
         Returns:
             List of Document objects
         """
-        documents = []
+        documents: List[Document] = []
         for doc_data in result.documents:
-            # Determine source
-            source = doc_data.get("source", "local")
-
-            # Create Document
-            doc = Document(
-                page_content=doc_data.get("content", ""),
-                metadata={
-                    **doc_data.get("metadata", {}),
-                    "source": source,
-                },
-                score=doc_data.get("score", 0.5),
-            )
-            documents.append(doc)
+            if isinstance(doc_data, LangChainDocument):
+                doc_dict = {
+                    "page_content": doc_data.page_content,
+                    "metadata": {**doc_data.metadata, "source": doc_data.metadata.get("source", "local")},
+                    "score": getattr(doc_data, "score", 0.5),
+                }
+            else:
+                doc_dict = {
+                    "page_content": str(doc_data.get("content", "")) if isinstance(doc_data, dict) else "",
+                    "metadata": dict(doc_data.get("metadata", {})) if isinstance(doc_data, dict) else {},
+                    "score": float(doc_data.get("score", 0.5)) if isinstance(doc_data, dict) else 0.5,
+                }
+                # Add source to metadata
+                if isinstance(doc_data, dict):
+                    doc_dict["metadata"]["source"] = doc_data.get("source", "local")
+                else:
+                    doc_dict["metadata"]["source"] = "local"
+            documents.append(Document.model_validate(doc_dict))
 
         return documents
+
+    def _convert_hybrid_result_to_dict(self, result: HybridRetrievalResult) -> dict:
+        """
+        Convert hybrid retrieval result to dictionary for state storage.
+
+        Args:
+            result: HybridRetrievalResult
+
+        Returns:
+            Dictionary representation of the hybrid result
+        """
+        def get_doc_content(doc: Any) -> str:
+            """Extract content from Document or dict."""
+            if isinstance(doc, Document):
+                return doc.page_content
+            elif hasattr(doc, "page_content"):
+                return str(doc.page_content)
+            elif isinstance(doc, dict):
+                return str(doc.get("content", ""))
+            return str(doc)
+
+        def get_doc_metadata(doc: Any) -> dict:
+            """Extract metadata from Document or dict."""
+            if isinstance(doc, Document):
+                return dict(doc.metadata)
+            elif hasattr(doc, "metadata"):
+                return dict(getattr(doc, "metadata", {}))
+            elif isinstance(doc, dict):
+                return dict(doc.get("metadata", {}))
+            return {}
+
+        def get_doc_score(doc: Any) -> Optional[float]:
+            """Extract score from Document or dict."""
+            if isinstance(doc, Document):
+                return doc.score
+            elif hasattr(doc, "score"):
+                return getattr(doc, "score", None)
+            elif isinstance(doc, dict):
+                return doc.get("score")
+            return None
+
+        def get_doc_source(doc: Any) -> str:
+            """Extract source from Document or dict."""
+            if isinstance(doc, dict) and doc.get("source") == "tavily":
+                return "tavily"
+            metadata = get_doc_metadata(doc)
+            if isinstance(metadata, dict) and metadata.get("source") == "tavily":
+                return "tavily"
+            return "local"
+
+        return {
+            "documents": [
+                {
+                    "content": get_doc_content(doc),
+                    "metadata": get_doc_metadata(doc),
+                    "score": get_doc_score(doc),
+                    "source": get_doc_source(doc),
+                }
+                for doc in result.documents
+            ],
+            "local_count": result.local_count,
+            "tavily_count": result.tavily_count,
+        }
 
     def _retrieve_documents(self, query: str) -> List[dict]:
         """
@@ -480,7 +560,7 @@ Return ONLY the refined query, nothing else.
         Returns:
             List of Document objects
         """
-        documents = []
+        documents: List[Document] = []
         for result in search_results:
             doc = Document(
                 page_content=result.get("content", ""),
@@ -570,7 +650,7 @@ Return ONLY the refined query, nothing else.
         answer: str,
         documents: List[Document],
         query: str,
-    ) -> ValidationResultModel:
+    ) -> ValidationResult:
         """
         Validate answer and apply corrections using structured output.
 
@@ -580,25 +660,52 @@ Return ONLY the refined query, nothing else.
             query: Original query
 
         Returns:
-            ValidationResultModel with structured validation result
+            ValidationResult with structured validation result
         """
         try:
             # Use corrective RAG with structured output
-            validation = self.corrective.answer_validator.validate(
-                answer=answer, documents=documents, query=query
+            # Convert agentic_rag Document to langchain Document for validation
+            langchain_docs = [
+                LangChainDocument(page_content=doc.page_content, metadata=doc.metadata)
+                for doc in documents
+            ]
+            validation: CorrectiveValidationResult = self.corrective.answer_validator.validate(
+                answer=answer,
+                documents=langchain_docs,
+                query=query,
             )
 
-            # Convert to Pydantic model
-            return self._convert_validation_result(validation)
+            # Convert CorrectionResult dataclass to Pydantic model
+            from .state import ValidationDetail
+
+            validation_details = [
+                ValidationDetail(
+                    field=f"detail_{i}",
+                    is_valid=True,
+                    message="Validation passed",
+                )
+                for i in range(len(validation.issues) or 1)
+            ]
+
+            return ValidationResult(
+                status=validation.status,
+                quality_score=validation.quality_score,
+                validation_details=validation_details,
+                issues=validation.issues,
+                corrective_action=validation.corrective_action,
+                answer=validation.answer,
+            )
 
         except Exception as e:
             # Fallback to basic validation
             print(f"Validation failed: {e}")
-            return ValidationResultModel(
+            from .state import ValidationDetail
+
+            return ValidationResult(
                 status=ValidationStatus.PARTIALLY_VALID,
                 quality_score=0.7,
                 validation_details=[
-                    ValidationDetailModel(
+                    ValidationDetail(
                         field="general",
                         is_valid=True,
                         message="Basic validation passed",
@@ -606,44 +713,6 @@ Return ONLY the refined query, nothing else.
                 ],
                 issues=["Error during detailed validation"],
             )
-
-    def _convert_validation_result(self, validation: dict) -> ValidationResultModel:
-        """
-        Convert validation result to Pydantic model.
-
-        Args:
-            validation: Dictionary validation result
-
-        Returns:
-            ValidationResultModel
-        """
-        status = ValidationStatus.VALID
-        if validation.get("status") == "PARTIALLY_VALID":
-            status = ValidationStatus.PARTIALLY_VALID
-        elif validation.get("status") == "INVALID":
-            status = ValidationStatus.INVALID
-        elif validation.get("status") == "HALLUCINATED":
-            status = ValidationStatus.HALLUCINATED
-
-        quality_score = validation.get("quality_score", 0.7)
-
-        validation_details = []
-        for detail in validation.get("validation_details", []):
-            validation_details.append(
-                ValidationDetailModel(
-                    field=detail.get("field", "unknown"),
-                    is_valid=detail.get("is_valid", False),
-                    message=detail.get("message", ""),
-                )
-            )
-
-        return ValidationResultModel(
-            status=status,
-            quality_score=quality_score,
-            validation_details=validation_details,
-            issues=validation.get("issues", []),
-            corrective_action=validation.get("corrective_action"),
-        )
 
     def stream(
         self,

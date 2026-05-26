@@ -11,13 +11,15 @@ Enhanced with proper hybrid retrieval integration and query refinement.
 import os
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
     from langchain_core.retrievers import BaseRetriever
 
-from langchain_core.documents import Document
+from langchain_core.documents import Document as LangChainDocument
 from langchain_core.language_models import BaseLanguageModel
+
+from .state import Document
 
 
 @dataclass
@@ -197,7 +199,7 @@ class TavilySearch:
                 params["exclude_domains"] = exclude_domains
 
             # Execute search
-            response = self.client.search(**params)
+            response = self.client.search(**params) if self.client is not None else {}
 
             # Parse results
             results = self._parse_tavily_response(response, query)
@@ -678,7 +680,7 @@ class HybridRetrievalResult:
         error: Error message if any
     """
 
-    documents: List[Document] = field(default_factory=list)
+    documents: List[Union[Document, LangChainDocument]] = field(default_factory=list)
     local_count: int = 0
     tavily_count: int = 0
     search_time: float = 0.0
@@ -776,7 +778,7 @@ class HybridRetriever:
                 tavily_results = self.tavily_search.search(
                     query=refined_query, max_results=max_tavily_results
                 )
-                tavily_docs = tavily_results.documents
+                tavily_docs = tavily_results.documents  # type: ignore[assignment]
 
             # Step 4: Merge and rank
             merged_docs = self._merge_and_rank(local_docs, tavily_docs)
@@ -784,7 +786,7 @@ class HybridRetriever:
             search_time = time.time() - start_time
 
             return HybridRetrievalResult(
-                documents=merged_docs,
+                documents=merged_docs,  # type: ignore[arg-type]
                 local_count=len(local_docs),
                 tavily_count=len(tavily_docs),
                 search_time=search_time,
@@ -792,7 +794,7 @@ class HybridRetriever:
 
         except Exception as e:
             return HybridRetrievalResult(
-                documents=[],
+                documents=[],  # type: ignore[arg-type]
                 error=str(e),
             )
 
@@ -860,7 +862,7 @@ class HybridRetriever:
         self,
         local_docs: List[Dict[str, Any]],
         tavily_docs: List[Any],
-    ) -> List[Document]:
+    ) -> List[LangChainDocument]:
         """
         Merge local and Tavily documents with appropriate ranking.
 
@@ -875,24 +877,24 @@ class HybridRetriever:
         tavily_converted = []
         for doc in tavily_docs:
             if hasattr(doc, "to_dict"):
-                tavily_doc = Document(
+                tavily_doc = LangChainDocument(
                     page_content=doc.content,
                     metadata={
                         "url": doc.url,
                         "title": doc.title,
                         "source": "tavily",
                     },
-                    score=float(doc.score),
                 )
+                tavily_doc.score = float(doc.score)  # type: ignore[attr-defined]
                 tavily_converted.append(tavily_doc)
             elif isinstance(doc, dict):
                 doc_copy = doc.copy()
                 doc_copy["source"] = "tavily"
-                tavily_doc = Document(
+                tavily_doc = LangChainDocument(
                     page_content=doc_copy.get("content", ""),
                     metadata=doc_copy.get("metadata", {}),
-                    score=float(doc_copy.get("score", 0)),
                 )
+                tavily_doc.score = float(doc_copy.get("score", 0))  # type: ignore[attr-defined]
                 tavily_converted.append(tavily_doc)
 
         # Apply Tavily priority weight
@@ -901,26 +903,26 @@ class HybridRetriever:
                 if hasattr(doc, "score"):
                     doc.score = (doc.score or 0) * (1 - self.tavily_priority)
 
-        # Combine all documents - convert local to Document objects first
-        all_docs = []
+        # Combine all documents - convert local to LangChainDocument objects first
+        all_docs: List[LangChainDocument] = []
 
-        # Convert local docs to Document objects
+        # Convert local docs to LangChainDocument objects
         for doc_data in local_docs:
-            if isinstance(doc_data, Document):
+            if isinstance(doc_data, LangChainDocument):
                 all_docs.append(doc_data)
             else:
-                doc = Document(
+                doc = LangChainDocument(
                     page_content=doc_data.get("content", ""),
                     metadata=doc_data.get("metadata", {}),
-                    score=float(doc_data.get("score", 0.5)),
                 )
+                doc.score = float(doc_data.get("score", 0.5))  # type: ignore[attr-defined]
                 all_docs.append(doc)
 
         # Add tavily docs
         all_docs.extend(tavily_converted)
 
         # Rank by score
-        all_docs.sort(key=lambda x: x.score or 0, reverse=True)
+        all_docs.sort(key=lambda x: getattr(x, "score", 0) or 0, reverse=True)
 
         return all_docs
 

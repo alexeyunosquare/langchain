@@ -17,7 +17,10 @@ from src.agentic_rag.graph import (
     build_agentic_rag_graph,
     create_agentic_graph_workflow,
 )
-from src.agentic_rag.state import AgentState, Document, MessageRole
+from src.agentic_rag.state import AgenticRAGState, Document, MessageRole
+
+# Compatibility alias
+AgentState = AgenticRAGState
 
 
 class TestLangGraphNode:
@@ -115,9 +118,9 @@ class TestLangGraphNode:
 
         result = LangGraphNode.validate_and_correct(state)
 
-        assert result.validation_passed is True
-        assert result.correction_triggered is False
-        assert result.hallucination_score is not None
+        assert result["validation_passed"] is True
+        assert result["correction_triggered"] is False
+        assert result["hallucination_score"] is not None
 
 
 class TestGraphBuilding:
@@ -298,11 +301,11 @@ class TestLangGraphAgenticRAG:
         )
 
         with patch.object(agent.graph, "invoke") as mock_invoke:
-            final_state = AgentState(
+            final_state = AgenticRAGState(
                 query="Test",
                 answer="I couldn't find relevant information.",
                 is_relevant=False,
-                should_search_again=True,
+                should_rerun=True,
                 search_count=3,
             )
             mock_invoke.return_value = final_state
@@ -310,8 +313,8 @@ class TestLangGraphAgenticRAG:
             result = agent.run("Test query")
 
             assert (
-                result.get("should_search_again") is True
-                or getattr(result, "should_search_again", None) is True
+                result.get("should_rerun") is True
+                or getattr(result, "should_rerun", None) is True
             )
             assert (
                 result.get("search_count") == 3

@@ -70,17 +70,64 @@ class AgenticRAGConfig:
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "AgenticRAGConfig":
         """Create configuration from dictionary."""
+        # Extract and validate each value
+        temperature_val = data.get("temperature")
+        temperature: float = float(temperature_val) if isinstance(temperature_val, (int, float)) else 0.7
+
+        top_k_val = data.get("top_k")
+        top_k: int = int(top_k_val) if isinstance(top_k_val, (int, float)) else 5
+
+        similarity_threshold_val = data.get("similarity_threshold")
+        similarity_threshold: float = (
+            float(similarity_threshold_val)
+            if isinstance(similarity_threshold_val, (int, float))
+            else 0.7
+        )
+
+        max_iterations_val = data.get("max_iterations")
+        max_iterations: int = int(max_iterations_val) if isinstance(max_iterations_val, (int, float)) else 3
+
+        retriever_type_val = data.get("retriever_type")
+        retriever_type: str = str(retriever_type_val) if isinstance(retriever_type_val, str) else "vectorstore"
+
+        evaluation_threshold_val = data.get("evaluation_threshold")
+        evaluation_threshold: float = (
+            float(evaluation_threshold_val)
+            if isinstance(evaluation_threshold_val, (int, float))
+            else 0.7
+        )
+
+        max_search_iterations_val = data.get("max_search_iterations")
+        max_search_iterations: int = (
+            int(max_search_iterations_val)
+            if isinstance(max_search_iterations_val, (int, float))
+            else 3
+        )
+
+        timeout_val = data.get("timeout")
+        timeout: int = int(timeout_val) if isinstance(timeout_val, (int, float)) else 30
+
+        include_domains_val = data.get("include_domains")
+        include_domains: list[str] = (
+            list(include_domains_val) if isinstance(include_domains_val, list) else []
+        )
+
+        exclude_domains_val = data.get("exclude_domains")
+        exclude_domains: list[str] = (
+            list(exclude_domains_val) if isinstance(exclude_domains_val, list) else []
+        )
+
         return cls(
-            temperature=float(data.get("temperature", 0.7)),
-            top_k=int(data.get("top_k", 5)),
-            similarity_threshold=float(data.get("similarity_threshold", 0.7)),
-            max_iterations=int(data.get("max_iterations", 3)),
-            retriever_type=str(data.get("retriever_type", "vectorstore")),
-            evaluation_threshold=float(data.get("evaluation_threshold", 0.7)),
-            max_search_iterations=int(data.get("max_search_iterations", 3)),
-            timeout=int(data.get("timeout", 30)),
-            include_domains=list(data.get("include_domains", [])),
-            exclude_domains=list(data.get("exclude_domains", [])),
+            temperature=temperature,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+            max_iterations=max_iterations,
+            retriever_type=retriever_type,
+            evaluation_threshold=evaluation_threshold,
+            max_search_iterations=max_search_iterations,
+            timeout=timeout,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
         )
 
     @classmethod
@@ -102,21 +149,30 @@ class AgenticRAGConfig:
         """
         import os
 
+        # Get env values, using default if None
+        eval_threshold = os.getenv("RAG_EVALUATION_THRESHOLD")
+        max_iter = os.getenv("RAG_MAX_SEARCH_ITERATIONS")
+        temp = os.getenv("RAG_TEMPERATURE")
+        top_k_val = os.getenv("RAG_TOP_K")
+        timeout_val = os.getenv("RAG_TIMEOUT")
+
         config_dict = {
-            "evaluation_threshold": float(os.getenv("RAG_EVALUATION_THRESHOLD", "0.7")),
-            "max_search_iterations": int(os.getenv("RAG_MAX_SEARCH_ITERATIONS", "3")),
-            "temperature": float(os.getenv("RAG_TEMPERATURE", "0.7")),
-            "top_k": int(os.getenv("RAG_TOP_K", "5")),
-            "timeout": int(os.getenv("RAG_TIMEOUT", "30")),
+            "evaluation_threshold": float(eval_threshold if eval_threshold is not None else "0.7"),
+            "max_search_iterations": int(max_iter if max_iter is not None else "3"),
+            "temperature": float(temp if temp is not None else "0.7"),
+            "top_k": int(top_k_val if top_k_val is not None else "5"),
+            "timeout": int(timeout_val if timeout_val is not None else "30"),
         }
 
         # Handle list environment variables
-        if include_domains := os.getenv("RAG_INCLUDE_DOMAINS"):
+        include_domains = os.getenv("RAG_INCLUDE_DOMAINS")
+        if include_domains:
             config_dict["include_domains"] = [
                 d.strip() for d in include_domains.split(",")
             ]
 
-        if exclude_domains := os.getenv("RAG_EXCLUDE_DOMAINS"):
+        exclude_domains = os.getenv("RAG_EXCLUDE_DOMAINS")
+        if exclude_domains:
             config_dict["exclude_domains"] = [
                 d.strip() for d in exclude_domains.split(",")
             ]

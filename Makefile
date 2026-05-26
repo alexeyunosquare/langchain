@@ -44,12 +44,17 @@ clean:
 	find . -type f -name ".coverage" -delete 2>/dev/null || true
 	rm -rf htmlcov/ 2>/dev/null || true
 
-# Lint with ruff
+# Lint with ruff and pyright
 lint:
 	poetry run ruff check .
+	poetry run pyright .
 # Lint check (exit with error if issues found)
 lint-check:
 	poetry run ruff check . --exit-non-zero-on-fix
+	poetry run pyright .
+# Type check with pyright (semantic checks)
+pyright-check:
+	poetry run pyright .
 # Format code with ruff
 format:
 	poetry run ruff format .
@@ -68,6 +73,7 @@ help:
 	@echo "  test-agentic  - Run agentic RAG tests"
 	@echo "  test-agentic-fast - Run agentic RAG tests (non-integration)"
 	@echo "  clean         - Clean pytest cache and coverage files"
-	@echo "  lint          - Run ruff lint"
-	@echo "  lint-check    - Run ruff lint check (exit non-zero on issues)"
+	@echo "  lint          - Run ruff lint and pyright"
+	@echo "  lint-check    - Run ruff lint check and pyright"
+	@echo "  pyright-check - Run pyright type checker (semantic checks)"
 	@echo "  format        - Format code with ruff"
